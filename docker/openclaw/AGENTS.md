@@ -5,16 +5,18 @@ Guest **OpenClaw agent image** helpers. Not the FastAPI API. Image contract also
 ## Chain
 
 ```
-tini -s -- validate-gogcli.sh validate-officecli.sh validate-soul-guardian.sh openclaw gateway
+tini -s -- validate-gogcli.sh validate-officecli.sh validate-soul-guardian.sh validate-linkup.sh openclaw gateway
 USER: node
 ```
 
 | File | When | Role |
 |---|---|---|
 | `install-officecli.sh` | image build | Download pinned target binary and skill, verify both SHA256 digests, and install them into the image |
+| `install-linkup.sh` | image build | Install the bundled Linkup skills offline into the OpenClaw skills directory |
 | `validate-gogcli.sh` | entrypoint | Verify gog, optionally load `GOG_KEYRING_PASSWORD_FILE`, and exec the supplied command unchanged |
 | `validate-officecli.sh` | entrypoint | Verify OfficeCLI and exec the supplied command unchanged |
 | `validate-soul-guardian.sh` | entrypoint | Verify the skill assets and non-mutating help probe, then exec the supplied command unchanged |
+| `validate-linkup.sh` | entrypoint | Verify the two bundled Linkup skills and references offline, then exec the supplied command unchanged |
 
 ## Pins
 
@@ -23,6 +25,7 @@ USER: node
 - Publish requires `DOCKERHUB_NAMESPACE` or `OPENCLAW_PUBLISH_IMAGE` and an existing `docker login`. It builds both platforms with **docker buildx --push** under `${repo}:${IMAGE_TAG}` (default `OPENCLAW_VERSION`), adding `:latest` only when `PUSH_LATEST=1`. It does not load or retag a local image.
 - OfficeCLI and its skill are baked into the image; startup never downloads them or changes OpenClaw state or configuration.
 - Soul Guardian is baked into the image; startup validates it without initializing state or enabling monitoring.
+- Linkup skills are installed from `linkup-skills/` at build time; startup validates them offline without credentials.
 - OpenClaw is installed from its checksum-verified pinned npm archive without local memory-provider patches.
 
 ## Avoid
