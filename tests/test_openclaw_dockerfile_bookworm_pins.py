@@ -7,26 +7,26 @@ import pytest
 REPO_ROOT: Final = Path(__file__).resolve().parents[1]
 DOCKERFILE: Final = REPO_ROOT / "Dockerfile.openclaw"
 REQUIRED_ARGUMENTS: Final = (
-    ("BASH_VERSION", "5.2.15-2+b13"),
-    ("CURL_VERSION", "7.88.1-10+deb12u15"),
-    ("LIBCURL4_VERSION", "7.88.1-10+deb12u15"),
-    ("LIBICU72_VERSION", "72.1-3+deb12u1"),
+    ("BASH_VERSION", "5.2.37-2+b10"),
+    ("CURL_VERSION", "8.14.1-2+deb13u7"),
+    ("LIBCURL4_VERSION", "8.14.1-2+deb13u7"),
+    ("LIBICU76_VERSION", "76.1-4"),
 )
 REQUIRED_INSTALLS: Final = (
     "bash=${BASH_VERSION}",
     "curl=${CURL_VERSION}",
-    "libcurl4=${LIBCURL4_VERSION}",
-    "libicu72=${LIBICU72_VERSION}",
+    "libcurl4t64=${LIBCURL4_VERSION}",
+    "libicu76=${LIBICU76_VERSION}",
 )
-VALID_BOOKWORM_PIN_BLOCK: Final = """\
-ARG BASH_VERSION=5.2.15-2+b13
-ARG CURL_VERSION=7.88.1-10+deb12u15
-ARG LIBCURL4_VERSION=7.88.1-10+deb12u15
+VALID_TRIXIE_PIN_BLOCK: Final = """\
+ARG BASH_VERSION=5.2.37-2+b10
+ARG CURL_VERSION=8.14.1-2+deb13u7
+ARG LIBCURL4_VERSION=8.14.1-2+deb13u7
 RUN apt-get update \\
     && apt-get install -y --no-install-recommends \\
     "bash=${BASH_VERSION}" \\
     "curl=${CURL_VERSION}" \\
-    "libcurl4=${LIBCURL4_VERSION}" \\
+    "libcurl4t64=${LIBCURL4_VERSION}" \\
     && rm -rf /var/lib/apt/lists/*
 """
 
@@ -55,7 +55,7 @@ def _apt_install_packages(source: str) -> tuple[str, ...]:
     )
 
 
-def _bookworm_pin_errors(source: str) -> tuple[str, ...]:
+def _trixie_pin_errors(source: str) -> tuple[str, ...]:
     arguments = _argument_values(source)
     packages = _apt_install_packages(source)
     errors = [f"{name} must equal {value}" for name, value in REQUIRED_ARGUMENTS if arguments.get(name) != value]
@@ -65,33 +65,33 @@ def _bookworm_pin_errors(source: str) -> tuple[str, ...]:
     return tuple(errors)
 
 
-def test_openclaw_dockerfile_uses_approved_bookworm_package_pins() -> None:
+def test_openclaw_dockerfile_uses_approved_trixie_package_pins() -> None:
     # Given
     source = DOCKERFILE.read_text(encoding="utf-8")
 
     # When
-    errors = _bookworm_pin_errors(source)
+    errors = _trixie_pin_errors(source)
 
     # Then
     assert errors == ()
 
 
-def test_bookworm_pin_contract_rejects_stale_or_unpinned_package_changes() -> None:
+def test_trixie_pin_contract_rejects_stale_or_unpinned_package_changes() -> None:
     # Given
     regression_cases = (
-        ("BASH_VERSION=5.2.15-2+b13", "BASH_VERSION=5.2.15-2+b2", "BASH_VERSION"),
-        ("CURL_VERSION=7.88.1-10+deb12u15", "CURL_VERSION=7.88.1-10+deb12u14", "CURL_VERSION"),
-        ('    "libcurl4=${LIBCURL4_VERSION}" \\\n', "", "libcurl4=${LIBCURL4_VERSION}"),
-        ("LIBCURL4_VERSION=7.88.1-10+deb12u15", "LIBCURL4_VERSION=7.88.1-10+deb12u14", "versions must match"),
+        ("BASH_VERSION=5.2.37-2+b10", "BASH_VERSION=5.2.37-2+b2", "BASH_VERSION"),
+        ("CURL_VERSION=8.14.1-2+deb13u7", "CURL_VERSION=8.14.1-2+deb13u5", "CURL_VERSION"),
+        ('    "libcurl4t64=${LIBCURL4_VERSION}" \\\n', "", "libcurl4t64=${LIBCURL4_VERSION}"),
+        ("LIBCURL4_VERSION=8.14.1-2+deb13u7", "LIBCURL4_VERSION=8.14.1-2+deb13u5", "versions must match"),
         ('"curl=${CURL_VERSION}"', '"curl"', "curl=${CURL_VERSION}"),
     )
 
     for needle, replacement, expected_error in regression_cases:
-        candidate = VALID_BOOKWORM_PIN_BLOCK.replace(needle, replacement, 1)
-        assert candidate != VALID_BOOKWORM_PIN_BLOCK
+        candidate = VALID_TRIXIE_PIN_BLOCK.replace(needle, replacement, 1)
+        assert candidate != VALID_TRIXIE_PIN_BLOCK
 
         # When
-        errors = _bookworm_pin_errors(candidate)
+        errors = _trixie_pin_errors(candidate)
 
         # Then
         assert any(expected_error in error for error in errors)
@@ -101,7 +101,7 @@ def test_bookworm_pin_contract_rejects_stale_or_unpinned_package_changes() -> No
 def test_dockerfile_target_selection_uses_buildkit_arguments_not_host_architecture(target: str) -> None:
     # Given
     source = DOCKERFILE.read_text()
-    stage = source.split("FROM ${OPENCLAW_BASE_IMAGE}", 1)[1]
+    stage = source.split("FROM base_${TARGETARCH}", 1)[1]
     assert "ARG TARGETOS\n" in stage
     assert "ARG TARGETARCH\n" in stage
     selection = source.split("RUN case ", 1)[1].split("esac", 1)[0]

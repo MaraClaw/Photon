@@ -214,20 +214,28 @@ def test_openclaw_build_script_rejects_unsupported_or_multiple_platforms(tmp_pat
     assert not log_path.exists()
 
 
-def test_dockerfile_pins_node_26_7_0_base_image() -> None:
+@pytest.mark.parametrize(
+    ("architecture", "digest"),
+    [
+        ("amd64", "0081cd01c832e6db2ddb040a3dd4c7d282c4068c57a39280c6a40b2853ec000e"),
+        ("arm64", "0d79217e1afd8ec1657305749dc3eb187963ab7934e35f89ac40c5bb4a165f07"),
+    ],
+)
+def test_dockerfile_selects_pinned_base_for_target_architecture(architecture: str, digest: str) -> None:
     # Given
     content = DOCKERFILE.read_text(encoding="utf-8")
 
     # When
-    base_image_lines = [
-        line.strip() for line in content.splitlines() if line.strip().startswith("ARG OPENCLAW_BASE_IMAGE=")
-    ]
+    lines = content.splitlines()
+    argument = f"OPENCLAW_BASE_IMAGE_{architecture.upper()}"
 
     # Then
-    assert base_image_lines == ["ARG OPENCLAW_BASE_IMAGE=node:26.12.1-bookworm-slim"]
+    assert f"ARG {argument}=nikolaik/python-nodejs@sha256:{digest}" in lines
+    assert f"FROM ${{{argument}}} AS base_{architecture}" in lines
+    assert "FROM base_${TARGETARCH}" in lines
 
 
-def test_openclaw_dockerfile_pins_bookworm_packages_without_hadolint_ignore() -> None:
+def test_openclaw_dockerfile_pins_trixie_packages_without_hadolint_ignore() -> None:
     # Given
     content = DOCKERFILE.read_text(encoding="utf-8")
 
@@ -239,11 +247,16 @@ def test_openclaw_dockerfile_pins_bookworm_packages_without_hadolint_ignore() ->
     )
 
     # Then
-    assert "CA_CERTIFICATES_VERSION=20230311+deb12u1" in content
-    assert "CURL_VERSION=7.88.1-10+deb12u15" in content
+    assert "CA_CERTIFICATES_VERSION=20250419+deb13u1" in content
+    assert "CURL_VERSION=8.14.1-2+deb13u7" in content
     assert '"ca-certificates=${CA_CERTIFICATES_VERSION}"' in package_install_block
     assert '"curl=${CURL_VERSION}"' in package_install_block
     assert "hadolint ignore=DL3008" not in package_install_block
+
+
+def test_openclaw_dockerfile_uses_shell_that_preserves_bash_package_version_argument() -> None:
+    content = DOCKERFILE.read_text(encoding="utf-8")
+    assert content.index('SHELL ["/bin/sh", "-c"]') < content.index('"bash=${BASH_VERSION}"')
 
 
 def test_openclaw_dockerfile_verifies_openclaw_npm_tarball_before_install() -> None:
