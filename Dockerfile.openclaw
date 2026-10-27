@@ -69,7 +69,10 @@ COPY docker/openclaw/install-soul-guardian.sh /tmp/install-soul-guardian.sh
 RUN sh /tmp/install-soul-guardian.sh && rm /tmp/install-soul-guardian.sh
 COPY docker/openclaw/validate-gogcli.sh /usr/local/bin/validate-gogcli.sh
 RUN chmod 0755 /usr/local/bin/validate-gogcli.sh
+COPY docker/openclaw/validate-officecli.sh /usr/local/bin/validate-officecli.sh
+COPY docker/openclaw/validate-soul-guardian.sh /usr/local/bin/validate-soul-guardian.sh
+RUN chmod 0755 /usr/local/bin/validate-officecli.sh /usr/local/bin/validate-soul-guardian.sh
 
 USER node
-ENTRYPOINT ["tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh"]
+ENTRYPOINT ["tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh", "/usr/local/bin/validate-officecli.sh", "/usr/local/bin/validate-soul-guardian.sh"]
 CMD ["openclaw", "gateway"]
