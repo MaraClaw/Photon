@@ -2,5 +2,7 @@
 !Dockerfile.openclaw
 !docker/
 !docker/openclaw/
-!docker/openclaw/bootstrap-officecli.sh
+!docker/openclaw/install-officecli.sh
+!docker/openclaw/install-gogcli-skills.sh
+!docker/openclaw/install-soul-guardian.sh
 !docker/openclaw/validate-gogcli.sh

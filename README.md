@@ -1,6 +1,10 @@
 # Photon
 
-Photon builds and publishes MaraClaw's OpenClaw guest image for linux/amd64 and linux/arm64. The image installs pinned gogcli and OfficeCLI at build time and bundles the OfficeCLI skill alongside OpenClaw's gog skill. Startup verifies both CLIs without downloading or changing OpenClaw state or configuration. If `GOG_KEYRING_PASSWORD_FILE` is set, `GOG_HOME` must also be set; the validator reads the password into the process environment and creates `GOG_HOME` with mode 0700.
+Photon builds and publishes MaraClaw's OpenClaw guest image for linux/amd64 and linux/arm64. The image installs pinned gogcli and OfficeCLI at build time and bundles the OfficeCLI skill and all 32 upstream gogcli skills, replacing OpenClaw's built-in `gog` skill. Google skills require appropriate Google credentials, authorization, and API access. The included `crabbox` skill is for maintainers and requires an external Crabbox installation and an appropriate repository checkout. Startup verifies both CLIs without downloading or changing OpenClaw state or configuration. If `GOG_KEYRING_PASSWORD_FILE` is set, `GOG_HOME` must also be set; the validator reads the password into the process environment and creates `GOG_HOME` with mode 0700.
+
+The gogcli skill archive is pinned by commit and SHA256 in `docker/openclaw/install-gogcli-skills.sh`. To update it, verify the new commit archive and update both pins together; the complete `.agents/skills` tree is installed at build time.
+
+The image also bundles `soul-guardian` from `prompt-security/clawsec`, including its AGPL-3.0 license. Its source archive commit and SHA256 are pinned in `docker/openclaw/install-soul-guardian.sh`; verify a new archive independently and update both pins together. The checksum verifies the pinned archive, not a publisher signature. Bundling does not initialize a baseline or enable monitoring: review the installed skill's `SKILL.md` and explicitly opt in to baseline creation and monitoring. Its default restore policy can overwrite changed workspace files, and guardian state may contain sensitive snapshots.
 
 ## Local build
 
@@ -9,7 +13,7 @@ Copy `.env.example` to `.env` if you want project-local configuration. Both scri
 The local build loads one target (default `linux/arm64`) and defaults to `openclaw:local`. Its tag must match the engine's `MARACLAW_OPENCLAW_IMAGE` and it must be loaded on the same Docker daemon used by the worker. For example, with no overriding assignment in the selected env file:
 
 ```bash
-MARACLAW_OPENCLAW_IMAGE=openclaw:2026.10.7 ./build-openclaw-local-dockerfile.sh
+MARACLAW_OPENCLAW_IMAGE=openclaw:2026.10.8 ./build-openclaw-local-dockerfile.sh
 ```
 
 Set `DOCKER_PLATFORM=linux/amd64` for the other supported target. Keep the OpenClaw version and checksum aligned with the intended image tag.

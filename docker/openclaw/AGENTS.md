@@ -16,7 +16,7 @@ USER: node
 
 ## Pins
 
-- Base: `node:26.12.1-bookworm-slim`. Backend image is `python:3.14.8-slim-trixie`. Sandbox Node image is `node:26.12.1-slim`.
+- Base: architecture-pinned `nikolaik/python-nodejs` with Python 3.14.9, Node 26.12.1, and Debian Trixie. Backend image is `python:3.14.8-slim-trixie`. Sandbox Node image is `node:26.12.1-slim`.
 - gogcli supports **linux/amd64 and linux/arm64**, each with its own pinned digest. `build-openclaw-local-dockerfile.sh` uses **docker buildx --load** for one `DOCKER_PLATFORM` (default `linux/arm64`); other targets fail explicitly.
 - Publish requires `DOCKERHUB_NAMESPACE` or `OPENCLAW_PUBLISH_IMAGE` and an existing `docker login`. It builds both platforms with **docker buildx --push** under `${repo}:${IMAGE_TAG}` (default `OPENCLAW_VERSION`), adding `:latest` only when `PUSH_LATEST=1`. It does not load or retag a local image.
 - OfficeCLI and its skill are baked into the image; startup never downloads them or changes OpenClaw state or configuration.
