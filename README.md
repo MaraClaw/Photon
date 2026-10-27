@@ -4,6 +4,8 @@ Photon builds and publishes MaraClaw's OpenClaw guest image for linux/amd64 and 
 
 The gogcli skill archive is pinned by commit and SHA256 in `docker/openclaw/install-gogcli-skills.sh`. To update it, verify the new commit archive and update both pins together; the complete `.agents/skills` tree is installed at build time.
 
+The image also bundles `soul-guardian` from `prompt-security/clawsec`, including its AGPL-3.0 license. Its source archive commit and SHA256 are pinned in `docker/openclaw/install-soul-guardian.sh`; verify a new archive independently and update both pins together. The checksum verifies the pinned archive, not a publisher signature. Bundling does not initialize a baseline or enable monitoring: review the installed skill's `SKILL.md` and explicitly opt in to baseline creation and monitoring. Its default restore policy can overwrite changed workspace files, and guardian state may contain sensitive snapshots.
+
 ## Local build
 
 Copy `.env.example` to `.env` if you want project-local configuration. Both scripts change to the Photon directory and source `.env` by default; assignments in that file override inherited environment variables. Set `ENV_FILE` to an explicit path to source a different file, or to a nonexistent path to use only the process environment and script defaults.
