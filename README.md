@@ -1,6 +1,6 @@
 # Photon
 
-Photon builds and publishes MaraClaw's OpenClaw guest image for linux/amd64 and linux/arm64. The image includes gogcli and downloads pinned OfficeCLI at guest startup.
+Photon builds and publishes MaraClaw's OpenClaw guest image for linux/amd64 and linux/arm64. The image installs pinned gogcli and OfficeCLI at build time and bundles the OfficeCLI skill alongside OpenClaw's gog skill. Startup verifies both CLIs without downloading or changing OpenClaw state or configuration. If `GOG_KEYRING_PASSWORD_FILE` is set, `GOG_HOME` must also be set; the validator reads the password into the process environment and creates `GOG_HOME` with mode 0700.
 
 ## Local build
 

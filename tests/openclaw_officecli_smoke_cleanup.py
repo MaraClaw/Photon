@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
-CLEANUP_PROBE = 'find "$OPENCLAW_STATE_DIR/.officecli/releases" -mindepth 1 -exec chmod u+rwX,go+rwX {} +'
+CLEANUP_PROBE = 'chmod -R a+rwX "$OPENCLAW_STATE_DIR"'
 
 
 @dataclass(frozen=True, slots=True)

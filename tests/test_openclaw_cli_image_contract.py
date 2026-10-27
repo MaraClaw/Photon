@@ -1,0 +1,41 @@
+import json
+import shlex
+from pathlib import Path
+
+from test_openclaw_officecli_dockerfile import _instructions
+
+DOCKERFILE = Path(__file__).resolve().parents[1] / "Dockerfile.openclaw"
+
+
+def test_image_installs_pinned_cli_and_runs_validator_as_entrypoint() -> None:
+    source = DOCKERFILE.read_text()
+    lines = source.splitlines()
+    entrypoint = next(line for line in lines if line.startswith("ENTRYPOINT "))
+    command = next(line for line in lines if line.startswith("CMD "))
+    assert json.loads(entrypoint.removeprefix("ENTRYPOINT ")) == ["tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh"]
+    assert json.loads(command.removeprefix("CMD ")) == ["openclaw", "gateway"]
+    assert "COPY docker/openclaw/install-officecli.sh /tmp/install-officecli.sh" in lines
+    assert "RUN sh /tmp/install-officecli.sh && rm /tmp/install-officecli.sh" in lines
+    assert "COPY docker/openclaw/validate-gogcli.sh /usr/local/bin/validate-gogcli.sh" in lines
+    assert "RUN chmod 0755 /usr/local/bin/validate-gogcli.sh" in lines
+    path = next(line for line in lines if line.startswith("ENV PATH="))
+    assert "/usr/local/bin" in path.split()[1].removeprefix("PATH=").split(":")
+    assert source.index("RUN sh /tmp/install-officecli.sh") < source.index("USER node")
+    assert "bootstrap-officecli" not in source
+
+
+def test_officecli_flags_are_effective_for_install_and_gateway() -> None:
+    instructions, errors = _instructions(DOCKERFILE.read_text())
+    assert not errors
+    environment: dict[str, str] = {}
+    install_environment: dict[str, str] = {}
+    for instruction, body in instructions:
+        if instruction == "ENV":
+            for token in shlex.split(body):
+                name, _, value = token.partition("=")
+                environment[name] = value
+        if instruction == "RUN" and body.startswith("sh /tmp/install-officecli.sh"):
+            install_environment = environment.copy()
+    for name in ("OFFICECLI_SKIP_UPDATE", "OFFICECLI_NO_AUTO_RESIDENT"):
+        assert install_environment.get(name) == "1"
+        assert environment.get(name) == "1"

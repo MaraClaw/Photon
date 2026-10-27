@@ -50,14 +50,15 @@ RUN case "$TARGETOS/$TARGETARCH" in \
     && rm -f /tmp/gogcli.tar.gz /tmp/gogcli.tar.gz.sha256 \
     && gog --version
 
-COPY --chown=node:node docker/openclaw/bootstrap-officecli.sh /usr/local/bin/bootstrap-officecli.sh
-COPY --chown=node:node docker/openclaw/validate-gogcli.sh /usr/local/bin/validate-gogcli.sh
-RUN chmod 0755 /usr/local/bin/bootstrap-officecli.sh \
-    && chmod 0755 /usr/local/bin/validate-gogcli.sh
-
-ENV OFFICECLI_SKIP_UPDATE=1 \
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    OFFICECLI_SKIP_UPDATE=1 \
     OFFICECLI_NO_AUTO_RESIDENT=1
 
+COPY docker/openclaw/install-officecli.sh /tmp/install-officecli.sh
+RUN sh /tmp/install-officecli.sh && rm /tmp/install-officecli.sh
+COPY docker/openclaw/validate-gogcli.sh /usr/local/bin/validate-gogcli.sh
+RUN chmod 0755 /usr/local/bin/validate-gogcli.sh
+
 USER node
-ENTRYPOINT ["tini", "-s", "--", "/usr/local/bin/bootstrap-officecli.sh"]
-CMD ["/usr/local/bin/validate-gogcli.sh", "openclaw", "gateway"]
+ENTRYPOINT ["tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh"]
+CMD ["openclaw", "gateway"]
