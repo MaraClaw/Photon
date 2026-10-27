@@ -1,6 +1,15 @@
 #!/bin/sh
 set -eu
 
+valid=1
+for binary in /usr/local/bin/gog /usr/local/bin/officecli; do
+    if ! "$binary" --version >/dev/null 2>&1; then
+        printf 'Required CLI failed verification: %s\n' "$binary" >&2
+        valid=0
+    fi
+done
+[ "$valid" -eq 1 ] || exit 1
+
 if [ -z "${GOG_KEYRING_PASSWORD_FILE:-}" ]; then
     exec "$@"
 fi
@@ -21,11 +30,6 @@ export GOG_KEYRING_PASSWORD
 if [ "${GOG_HOME:-}" ]; then
     mkdir -p "$GOG_HOME"
     chmod 0700 "$GOG_HOME"
-fi
-
-if [ ! -f "${GOG_HOME:?GOG_HOME must be set}/.gog-version-checked" ]; then
-    gog --version
-    touch "$GOG_HOME/.gog-version-checked"
 fi
 
 exec "$@"
