@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from collections.abc import Iterator
 
@@ -13,11 +14,10 @@ from openclaw_officecli_smoke_runtime import (
     STATE_DIR,
     RunRequest,
     SmokeWorkspace,
-    assert_success,
     build_image,
     create_workspace,
+    docker,
     probe_gateway,
-    run_command,
     run_container,
     wait_for_gateway,
 )
@@ -27,18 +27,14 @@ from openclaw_officecli_smoke_runtime import (
 def smoke_workspace() -> Iterator[SmokeWorkspace]:
     if os.environ.get("RUN_OPENCLAW_OFFICECLI_SMOKE") != "1":
         pytest.skip("set RUN_OPENCLAW_OFFICECLI_SMOKE=1 to execute both real Docker guest targets")
-    host_node = run_command(("node", "--version"))
-    assert_success("host Node pin", host_node)
+    host_node = subprocess.run(("node", "--version"), capture_output=True, text=True, check=True, timeout=1200)
     assert host_node.stdout.strip() == "v26.12.1"
-    assert_success("Docker availability", run_command(("docker", "version")))
+    docker.version()
     workspace = create_workspace()
     try:
-        assert_success(
-            "isolated builder creation",
-            run_command(("docker", "buildx", "create", "--name", workspace.builder, "--driver", "docker-container")),
-        )
+        docker.buildx.create(name=workspace.builder, driver="docker-container")
         for architecture in ("amd64", "arm64"):
-            assert_success(f"linux/{architecture} image build", build_image(workspace, architecture))
+            build_image(workspace, architecture)
         yield workspace
     finally:
         failures = workspace.cleanup()
@@ -60,18 +56,16 @@ def test_real_dual_platform_offline_gateway_smoke(smoke_workspace: SmokeWorkspac
         if scenario == "restart":
             assert custom.joinpath(CHILD_MARKER).is_file()
             custom.joinpath(CHILD_MARKER).unlink()
-            assert_success("stop custom gateway before restart", run_command(("docker", "stop", workspace.container(architecture, "custom"))))
-        assert_success(f"{scenario} offline gateway start", run_container(workspace, RunRequest(architecture, scenario, state, target)))
+            docker.stop(workspace.container(architecture, "custom"))
+        run_container(workspace, RunRequest(architecture, scenario, state, target))
         wait_for_gateway(name)
         probe = probe_gateway(name, PROBE + (NATIVE_MEMORY_PROBE if scenario == "fresh" else ""))
-        assert_success(f"{scenario} gateway environment probe", probe)
         assert state.joinpath(CHILD_MARKER).is_file()
         if scenario == "fresh":
             assert state.joinpath(MEMORY_MARKER).is_file()
-        assert_success(f"{scenario} gateway remains running", run_command(("docker", "exec", name, "curl", "-fsS", "--max-time", "2", "http://127.0.0.1:18789/readyz")))
-        sys.stdout.write(f"linux/{architecture} {scenario} ready; no model inference performed\n{probe.stdout}\n")
-    server_arch = run_command(("docker", "info", "--format", "{{.Architecture}}"))
-    assert_success("Docker host architecture", server_arch)
+        docker.execute(name, ["curl", "-fsS", "--max-time", "2", "http://127.0.0.1:18789/readyz"], timeout=1200)
+        sys.stdout.write(f"linux/{architecture} {scenario} ready; no model inference performed\n{probe}\n")
+    server_arch = docker.info().architecture
     native = {"amd64": ("x86_64", "amd64"), "arm64": ("aarch64", "arm64")}
-    execution = "native" if server_arch.stdout.strip() in native[architecture] else "emulated"
-    sys.stdout.write(f"linux/{architecture}: {execution} execution on {server_arch.stdout.strip()}\n")
+    execution = "native" if server_arch in native[architecture] else "emulated"
+    sys.stdout.write(f"linux/{architecture}: {execution} execution on {server_arch}\n")

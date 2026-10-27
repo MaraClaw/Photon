@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import shutil
-import subprocess
 import tempfile
 import time
 from dataclasses import dataclass
@@ -12,12 +10,16 @@ from pathlib import Path
 from typing import Final
 from uuid import uuid4
 
+from pywhales import DockerClient, DockerException
+from pywhales.exceptions import NoSuchContainer
+
 from openclaw_officecli_smoke_cleanup import CLEANUP_PROBE, CleanupFailure, run_cleanup
 
 REPO_ROOT: Final = Path(__file__).resolve().parents[1]
 STATE_DIR: Final = "/home/node/.openclaw"
 CUSTOM_STATE_DIR: Final = "/home/node/custom-state"
 KEYRING_PATH: Final = "/run/secrets/gogcli_keyring_password"
+docker = DockerClient(client_type="docker", raw_diagnostics=True)
 
 DAEMON_ENV_EXEC: Final = r'''
 const fs = require("node:fs");
@@ -43,20 +45,6 @@ const result = spawnSync("/bin/sh", ["-c", process.argv[1]], {env: candidates[0]
 if (result.error) throw result.error;
 process.exit(result.status === null ? 1 : result.status);
 '''
-
-
-@dataclass(frozen=True, slots=True)
-class CommandResult:
-    command: tuple[str, ...]
-    returncode: int
-    stdout: str
-    stderr: str
-
-    def describe(self) -> str:
-        return (
-            f"command: {shlex.join(self.command)}\nreturn code: {self.returncode}\n"
-            f"stdout:\n{self.stdout}\nstderr:\n{self.stderr}"
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,58 +90,42 @@ class SmokeWorkspace:
         return run_cleanup(tuple(operations))
 
 
-def run_command(command: tuple[str, ...], *, timeout_seconds: int = 1_200) -> CommandResult:
-    try:
-        completed = subprocess.run(
-            command, cwd=REPO_ROOT, capture_output=True, check=False, text=True, timeout=timeout_seconds
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired) as error:
-        raise AssertionError(f"Docker command could not complete: {shlex.join(command)}: {error}") from error
-    result = CommandResult(command, completed.returncode, completed.stdout, completed.stderr)
+def record_evidence(label: str, output: str) -> None:
     if directory := os.environ.get("OPENCLAW_SMOKE_EVIDENCE_DIR", ""):
-        Path(directory, f"{uuid4().hex}.log").write_text(result.describe(), encoding="utf-8")
-    return result
-
-
-def assert_success(label: str, result: CommandResult) -> None:
-    assert result.returncode == 0, f"{label} failed\n{result.describe()}"
+        Path(directory, f"{uuid4().hex}.log").write_text(f"{label}\n{output}", encoding="utf-8")
 
 
 def _remove_container(name: str) -> None:
-    existing = run_command(("docker", "container", "ls", "-aq", "--filter", f"name=^/{name}$"))
-    assert_success("owned container lookup", existing)
-    if existing.stdout.strip():
-        assert_success("owned container removal", run_command(("docker", "rm", "-f", name)))
+    try:
+        docker.remove(name, force=True)
+    except NoSuchContainer:
+        return
 
 
 def _image_exists(image: str) -> bool:
-    result = run_command(("docker", "image", "ls", "-q", image))
-    assert_success("owned image lookup", result)
-    return bool(result.stdout.strip())
+    return docker.image.exists(image)
 
 
 def _remove_image(image: str) -> None:
     if _image_exists(image):
-        assert_success("image removal", run_command(("docker", "image", "rm", "-f", image)))
+        docker.image.remove(image, force=True)
 
 
 def _remove_builder(builder: str) -> None:
-    result = run_command(("docker", "buildx", "ls", "--format", "{{.Name}}"))
-    assert_success("builder lookup", result)
-    if builder in result.stdout.replace("*", "").splitlines():
-        assert_success("builder removal", run_command(("docker", "buildx", "rm", builder)))
+    if any(candidate.name == builder for candidate in docker.buildx.list()):
+        docker.buildx.remove(builder)
 
 
 def _normalize_state(workspace: SmokeWorkspace, architecture: str, scenario: str) -> None:
     if not _image_exists(workspace.image(architecture)):
         return
-    assert_success("permission normalization", run_command((
-        "docker", "run", "--rm", "--name", workspace.container(architecture, f"cleanup-{scenario}"),
-        "--network", "none", "--platform", f"linux/{architecture}", "--user", "0",
-        "--mount", f"type=bind,source={workspace.root / architecture / scenario},target={STATE_DIR}",
-        "-e", f"OPENCLAW_STATE_DIR={STATE_DIR}", "--entrypoint", "sh", workspace.image(architecture),
-        "-c", CLEANUP_PROBE,
-    )))
+    docker.run(
+        workspace.image(architecture), ["-c", CLEANUP_PROBE], remove=True,
+        name=workspace.container(architecture, f"cleanup-{scenario}"), networks=["none"],
+        platform=f"linux/{architecture}", user="0", entrypoint="sh",
+        mounts=[["type=bind", f"source={workspace.root / architecture / scenario}", f"target={STATE_DIR}"]],
+        envs={"OPENCLAW_STATE_DIR": STATE_DIR}, timeout=1200,
+    )
 
 
 def create_workspace() -> SmokeWorkspace:
@@ -186,41 +158,61 @@ def create_workspace() -> SmokeWorkspace:
         raise
 
 
-def build_image(workspace: SmokeWorkspace, architecture: str) -> CommandResult:
-    return run_command((
-        "docker", "buildx", "build", "--builder", workspace.builder, "--platform", f"linux/{architecture}",
-        "--load", "-f", "Dockerfile.openclaw", "-t", workspace.image(architecture), ".",
-    ))
+def build_image(workspace: SmokeWorkspace, architecture: str) -> None:
+    output: list[str] = []
+    try:
+        with docker.buildx.build(
+            REPO_ROOT, builder=workspace.builder, platforms=[f"linux/{architecture}"], load=True,
+            file=REPO_ROOT / "Dockerfile.openclaw", tags=workspace.image(architecture),
+            progress="plain", stream_logs=True, timeout=1200,
+        ) as logs:
+            for line in logs:
+                output.append(line)
+    except DockerException as error:
+        output.append(f"\n{error}\n")
+        raise
+    finally:
+        record_evidence(f"linux/{architecture} image build", "".join(output))
 
 
-def run_container(workspace: SmokeWorkspace, request: RunRequest) -> CommandResult:
+def run_container(workspace: SmokeWorkspace, request: RunRequest) -> None:
     node_architecture = "x64" if request.architecture == "amd64" else "arm64"
-    return run_command((
-        "docker", "run", "-d", "--name", workspace.container(request.architecture, request.scenario),
-        "--platform", f"linux/{request.architecture}", "--network", "none",
-        "--mount", f"type=bind,source={request.state_dir},target={request.state_target}",
-        "--mount", f"type=bind,source={workspace.keyring_file},target={KEYRING_PATH},readonly",
-        "-e", f"OPENCLAW_STATE_DIR={request.state_target}", "-e", "OPENCLAW_HOME=/home/node",
-        "-e", f"GOG_HOME={request.state_target}/gogcli", "-e", f"GOG_KEYRING_PASSWORD_FILE={KEYRING_PATH}",
-        "-e", "GOG_KEYRING_BACKEND=file", "-e", f"EXPECTED_NODE_ARCH={node_architecture}",
-        workspace.image(request.architecture),
-    ))
+    docker.run(
+        workspace.image(request.architecture), detach=True,
+        name=workspace.container(request.architecture, request.scenario),
+        platform=f"linux/{request.architecture}", networks=["none"],
+        mounts=[
+            ["type=bind", f"source={request.state_dir}", f"target={request.state_target}"],
+            ["type=bind", f"source={workspace.keyring_file}", f"target={KEYRING_PATH}", "readonly"],
+        ],
+        envs={"OPENCLAW_STATE_DIR": request.state_target, "OPENCLAW_HOME": "/home/node",
+              "GOG_HOME": f"{request.state_target}/gogcli", "GOG_KEYRING_PASSWORD_FILE": KEYRING_PATH,
+              "GOG_KEYRING_BACKEND": "file", "EXPECTED_NODE_ARCH": node_architecture}, timeout=1200,
+    )
 
 
 def wait_for_gateway(name: str) -> None:
     deadline = time.monotonic() + 300
     while time.monotonic() < deadline:
-        state = run_command(("docker", "inspect", "--format", "{{.State.Running}}", name), timeout_seconds=10)
-        assert_success("gateway container inspection", state)
-        if state.stdout.strip() != "true":
+        state = docker.container.inspect(name).state
+        if state is None or not state.running:
             break
-        health = run_command(("docker", "exec", name, "curl", "-fsS", "--max-time", "2", "http://127.0.0.1:18789/readyz"), timeout_seconds=10)
-        if health.returncode == 0:
+        try:
+            docker.execute(name, ["curl", "-fsS", "--max-time", "2", "http://127.0.0.1:18789/readyz"], timeout=10)
+        except DockerException:
+            time.sleep(2)
+        else:
             return
-        time.sleep(2)
-    logs = run_command(("docker", "logs", name), timeout_seconds=20)
-    raise AssertionError(f"gateway did not become ready: {name}\n{logs.describe()}")
+    logs = docker.logs(name, timeout=20)
+    record_evidence(f"gateway logs: {name}", logs)
+    raise AssertionError(f"gateway did not become ready: {name}\n{logs}")
 
 
-def probe_gateway(name: str, probe: str) -> CommandResult:
-    return run_command(("docker", "exec", name, "node", "-e", DAEMON_ENV_EXEC, probe), timeout_seconds=300)
+def probe_gateway(name: str, probe: str) -> str:
+    try:
+        output = docker.execute(name, ["node", "-e", DAEMON_ENV_EXEC, probe], timeout=300)
+    except DockerException as error:
+        record_evidence(f"gateway probe: {name}", str(error))
+        raise
+    record_evidence(f"gateway probe: {name}", output)
+    return output

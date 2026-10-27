@@ -1,10 +1,13 @@
-import subprocess
+import os
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
+from pywhales import DockerException
 
 from openclaw_officecli_smoke_cleanup import CLEANUP_PROBE, CleanupFailure, cleanup_error_message, run_cleanup
-from openclaw_officecli_smoke_runtime import CommandResult, RunRequest, SmokeWorkspace, create_workspace, run_container, wait_for_gateway
+from openclaw_officecli_smoke_runtime import RunRequest, SmokeWorkspace, create_workspace, probe_gateway, run_container, wait_for_gateway
 
 
 def test_cleanup_probe_makes_state_contents_writable(tmp_path: Path) -> None:
@@ -17,17 +20,11 @@ def test_cleanup_probe_makes_state_contents_writable(tmp_path: Path) -> None:
     release.chmod(0o555)
 
     # When
-    completed = subprocess.run(  # noqa: S603 - execute the owned teardown probe against temporary state.
-        ("/bin/sh", "-c", CLEANUP_PROBE),
-        env={"OPENCLAW_STATE_DIR": str(tmp_path)},
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=10,
-    )
+    pid = os.posix_spawn("/bin/sh", ("/bin/sh", "-c", CLEANUP_PROBE), {"OPENCLAW_STATE_DIR": str(tmp_path)})
+    _, status = os.waitpid(pid, 0)
 
     # Then
-    assert completed.returncode == 0, completed.stderr
+    assert os.waitstatus_to_exitcode(status) == 0
     assert binary.stat().st_mode & 0o222 == 0o222
     assert release.stat().st_mode & 0o222 == 0o222
 
@@ -87,31 +84,57 @@ def test_cleanup_failures_when_test_is_already_failing_do_not_mask_original_erro
 
 
 def test_gateway_run_uses_image_defaults_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    commands: list[tuple[str, ...]] = []
-
-    def record(command: tuple[str, ...]) -> CommandResult:
-        commands.append(command)
-        return CommandResult(command, 0, "container-id", "")
-
-    monkeypatch.setattr("openclaw_officecli_smoke_runtime.run_command", record)
+    run = Mock()
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.run", run)
     workspace = SmokeWorkspace(tmp_path, "test", tmp_path / "keyring")
     run_container(workspace, RunRequest("arm64", "fresh", tmp_path, "/home/node/.openclaw"))
-    command = commands[0]
-    assert command[-1] == workspace.image("arm64")
-    assert "--entrypoint" not in command
-    assert command[command.index("--network") + 1] == "none"
-    assert command[command.index("--platform") + 1] == "linux/arm64"
+    assert run.call_args.args == (workspace.image("arm64"),)
+    options = run.call_args.kwargs
+    assert "entrypoint" not in options
+    assert options["networks"] == ["none"]
+    assert options["platform"] == "linux/arm64"
+    assert options["detach"] is True
+    assert options["mounts"][1] == ["type=bind", f"source={workspace.keyring_file}", "target=/run/secrets/gogcli_keyring_password", "readonly"]
 
 
 def test_wait_for_gateway_reports_logs_when_container_exits(monkeypatch: pytest.MonkeyPatch) -> None:
-    def record(command: tuple[str, ...], *, timeout_seconds: int) -> CommandResult:
-        if command[1] == "inspect":
-            return CommandResult(command, 0, "false\n", "")
-        return CommandResult(command, 0, "startup failure", "")
-
-    monkeypatch.setattr("openclaw_officecli_smoke_runtime.run_command", record)
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.container.inspect", lambda name: SimpleNamespace(state=SimpleNamespace(running=False)))
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.logs", lambda name, timeout: "startup failure")
     with pytest.raises(AssertionError, match="startup failure"):
         wait_for_gateway("test-gateway")
+
+
+def test_probe_failure_preserves_output_in_evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    error = DockerException(["docker", "exec"], 1, b"probe output", b"probe failure", raw_diagnostics=True)
+    monkeypatch.setenv("OPENCLAW_SMOKE_EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.execute", Mock(side_effect=error))
+    with pytest.raises(DockerException, match="probe failure"):
+        probe_gateway("test-gateway", "probe")
+    evidence = list(tmp_path.glob("*.log"))
+    assert len(evidence) == 1
+    assert "probe output" in evidence[0].read_text(encoding="utf-8")
+    assert "probe failure" in evidence[0].read_text(encoding="utf-8")
+
+
+def test_partial_build_cleanup_continues_after_normalization_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    workspace = SmokeWorkspace(root, "partial", root / "keyring")
+    remove_container = Mock()
+    remove_image = Mock()
+    remove_builder = Mock()
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.remove", remove_container)
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.image.exists", lambda image: image.endswith("amd64"))
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.image.remove", remove_image)
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.run", Mock(side_effect=RuntimeError("normalization failed")))
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.buildx.list", lambda: [SimpleNamespace(name=workspace.builder)])
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.buildx.remove", remove_builder)
+    failures = workspace.cleanup()
+    assert [failure.phase for failure in failures] == ["permission normalization: amd64/fresh", "permission normalization: amd64/custom"]
+    assert remove_container.call_count == 10
+    remove_image.assert_called_once_with(workspace.image("amd64"), force=True)
+    remove_builder.assert_called_once_with(workspace.builder)
+    assert not root.exists()
 
 
 def test_workspace_setup_failure_removes_partial_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
