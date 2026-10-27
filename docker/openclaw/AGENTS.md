@@ -5,22 +5,21 @@ Guest **OpenClaw agent image** helpers. Not the FastAPI API. Image contract also
 ## Chain
 
 ```
-tini -s -- bootstrap-officecli.sh
-  → validate-gogcli.sh openclaw gateway
+tini -s -- validate-gogcli.sh openclaw gateway
 USER: node
 ```
 
 | File | When | Role |
 |---|---|---|
-| `bootstrap-officecli.sh` | entrypoint | Download pinned OfficeCLI for the running amd64/arm64 target and verify SHA256; if that fails with no valid same-architecture release, continue without OfficeCLI; exec the supplied command unchanged |
-| `validate-gogcli.sh` | CMD | If `GOG_KEYRING_PASSWORD_FILE` set, load into process env and exec |
+| `install-officecli.sh` | image build | Download pinned target binary and skill, verify both SHA256 digests, and install them into the image |
+| `validate-gogcli.sh` | entrypoint | Verify both CLIs, optionally load `GOG_KEYRING_PASSWORD_FILE`, and exec the supplied command unchanged |
 
 ## Pins
 
 - Base: `node:26.12.1-bookworm-slim`. Backend image is `python:3.14.8-slim-trixie`. Sandbox Node image is `node:26.12.1-slim`.
 - gogcli supports **linux/amd64 and linux/arm64**, each with its own pinned digest. `build-openclaw-local-dockerfile.sh` uses **docker buildx --load** for one `DOCKER_PLATFORM` (default `linux/arm64`); other targets fail explicitly.
 - Publish requires `DOCKERHUB_NAMESPACE` or `OPENCLAW_PUBLISH_IMAGE` and an existing `docker login`. It builds both platforms with **docker buildx --push** under `${repo}:${IMAGE_TAG}` (default `OPENCLAW_VERSION`), adding `:latest` only when `PUSH_LATEST=1`. It does not load or retag a local image.
-- OfficeCLI is **runtime** download, never baked into the Dockerfile.
+- OfficeCLI and its skill are baked into the image; startup never downloads them or changes OpenClaw state or configuration.
 - OpenClaw is installed from its checksum-verified pinned npm archive without local memory-provider patches.
 
 ## Avoid
