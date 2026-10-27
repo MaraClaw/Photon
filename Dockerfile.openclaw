@@ -65,6 +65,8 @@ COPY docker/openclaw/install-officecli.sh /tmp/install-officecli.sh
 RUN sh /tmp/install-officecli.sh && rm /tmp/install-officecli.sh
 COPY docker/openclaw/install-gogcli-skills.sh /tmp/install-gogcli-skills.sh
 RUN sh /tmp/install-gogcli-skills.sh && rm /tmp/install-gogcli-skills.sh
+COPY docker/openclaw/install-soul-guardian.sh /tmp/install-soul-guardian.sh
+RUN sh /tmp/install-soul-guardian.sh && rm /tmp/install-soul-guardian.sh
 COPY docker/openclaw/validate-gogcli.sh /usr/local/bin/validate-gogcli.sh
 RUN chmod 0755 /usr/local/bin/validate-gogcli.sh
 
