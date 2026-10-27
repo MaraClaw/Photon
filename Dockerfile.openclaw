@@ -56,11 +56,11 @@ ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
 
 COPY docker/openclaw/install-officecli.sh /tmp/install-officecli.sh
 RUN sh /tmp/install-officecli.sh && rm /tmp/install-officecli.sh
+COPY docker/openclaw/install-gogcli-skills.sh /tmp/install-gogcli-skills.sh
+RUN sh /tmp/install-gogcli-skills.sh && rm /tmp/install-gogcli-skills.sh
 COPY docker/openclaw/validate-gogcli.sh /usr/local/bin/validate-gogcli.sh
 RUN chmod 0755 /usr/local/bin/validate-gogcli.sh
 
 USER node
 ENTRYPOINT ["tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh"]
 CMD ["openclaw", "gateway"]
-COPY docker/openclaw/install-gogcli-skills.sh /tmp/install-gogcli-skills.sh
-RUN sh /tmp/install-gogcli-skills.sh && rm /tmp/install-gogcli-skills.sh
