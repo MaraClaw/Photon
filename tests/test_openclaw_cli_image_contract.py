@@ -15,16 +15,30 @@ def test_image_installs_pinned_cli_and_runs_validator_as_entrypoint() -> None:
     assert json.loads(entrypoint.removeprefix("ENTRYPOINT ")) == [
         "tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh",
         "/usr/local/bin/validate-officecli.sh", "/usr/local/bin/validate-soul-guardian.sh",
+        "/usr/local/bin/validate-linkup.sh",
     ]
     assert json.loads(command.removeprefix("CMD ")) == ["openclaw", "gateway"]
     assert "COPY docker/openclaw/install-officecli.sh /tmp/install-officecli.sh" in lines
     assert "RUN sh /tmp/install-officecli.sh && rm /tmp/install-officecli.sh" in lines
     assert "COPY docker/openclaw/validate-gogcli.sh /usr/local/bin/validate-gogcli.sh" in lines
     assert "RUN chmod 0755 /usr/local/bin/validate-gogcli.sh" in lines
-    for name in ("officecli", "soul-guardian"):
+    for name in ("officecli", "soul-guardian", "linkup"):
         assert f"COPY docker/openclaw/validate-{name}.sh /usr/local/bin/validate-{name}.sh" in lines
         assert f"!docker/openclaw/validate-{name}.sh" in (DOCKERFILE.parent / ".dockerignore").read_text().splitlines()
-    assert "RUN chmod 0755 /usr/local/bin/validate-officecli.sh /usr/local/bin/validate-soul-guardian.sh" in lines
+    assert "RUN chmod 0755 /usr/local/bin/validate-officecli.sh /usr/local/bin/validate-soul-guardian.sh /usr/local/bin/validate-linkup.sh" in lines
+    assert "COPY docker/openclaw/linkup-skills/ /tmp/linkup-skills/" in lines
+    assert "COPY docker/openclaw/install-linkup.sh /tmp/install-linkup.sh" in lines
+    assert "RUN sh /tmp/install-linkup.sh && rm /tmp/install-linkup.sh" in lines
+    assert '!docker/openclaw/install-linkup.sh' in (DOCKERFILE.parent / '.dockerignore').read_text().splitlines()
+    assert '!docker/openclaw/linkup-skills/' in (DOCKERFILE.parent / '.dockerignore').read_text().splitlines()
+    assert '!docker/openclaw/linkup-skills/**' in (DOCKERFILE.parent / '.dockerignore').read_text().splitlines()
+    installer = (DOCKERFILE.parent / 'docker/openclaw/install-linkup.sh').read_text()
+    assert installer.startswith('#!/bin/sh\nset -eu\n')
+    assert 'destination="$(npm root -g)/openclaw/skills"' in installer
+    assert 'install -d -m 0755 "$destination"' in installer
+    assert 'cp -R /tmp/linkup-skills/linkup-* "$destination/"' in installer
+    assert 'chmod -R a+rX "$destination"/linkup-*' in installer
+    assert 'rm -rf /tmp/linkup-skills' in installer
     path = next(line for line in lines if line.startswith("ENV PATH="))
     assert "/usr/local/bin" in path.split()[1].removeprefix("PATH=").split(":")
     assert source.index("RUN sh /tmp/install-officecli.sh") < source.index("USER node")
