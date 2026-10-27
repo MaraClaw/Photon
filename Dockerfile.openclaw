@@ -62,3 +62,5 @@ RUN chmod 0755 /usr/local/bin/validate-gogcli.sh
 USER node
 ENTRYPOINT ["tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh"]
 CMD ["openclaw", "gateway"]
+COPY docker/openclaw/install-gogcli-skills.sh /tmp/install-gogcli-skills.sh
+RUN sh /tmp/install-gogcli-skills.sh && rm /tmp/install-gogcli-skills.sh

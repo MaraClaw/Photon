@@ -61,6 +61,23 @@ if (skill.name !== process.argv[1] || skill.eligible !== true || skill.modelVisi
 }}
 ' "$skill_name" "$(npm root -g)/openclaw/skills/$skill_name/SKILL.md"
 done
+openclaw skills list --json | node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const skills = JSON.parse(fs.readFileSync(0, "utf8")).skills;
+const names = `crabbox gog gog-admin gog-adsense gog-analytics gog-appscript gog-calendar gog-chat
+gog-classroom gog-contacts gog-contacts-cleanup gog-docs gog-drive gog-drive-audit gog-forms
+gog-gmail gog-groups gog-inbox-triage gog-keep gog-maps gog-meet gog-meeting-prep gog-people
+gog-photos gog-save-attachments gog-searchconsole gog-sheets gog-sites gog-slides gog-tasks
+gog-weekly-digest gog-youtube`.split(/\\s+/);
+const root = process.argv[1];
+for (const name of names) {{
+  const skill = skills.find(entry => entry.name === name);
+  if (!skill || skill.source !== "openclaw-bundled") throw new Error(`${{name}} is not bundled`);
+  fs.accessSync(path.join(root, name, "SKILL.md"), fs.constants.R_OK);
+  if (name !== "crabbox") fs.accessSync(path.join(root, name, "agents/openai.yaml"), fs.constants.R_OK);
+}}
+' "$(npm root -g)/openclaw/skills"
 for skill in word pptx excel; do
   officecli load_skill "$skill" > "/tmp/officecli-skill-$skill.md"
   test -s "/tmp/officecli-skill-$skill.md"
