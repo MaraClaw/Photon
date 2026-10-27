@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "pywhales": {
+      "source": "MaraClaw/PyWhales",
+      "sourceType": "github",
+      "skillPath": "skills/pywhales/SKILL.md",
+      "computedHash": "f56198abd74ce8ae69d2d257755e0f2aefa30eea927683a6de5f97466a39ca83"
+    }
+  }
+}

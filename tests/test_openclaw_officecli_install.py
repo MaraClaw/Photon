@@ -10,8 +10,8 @@ import pytest
 ROOT: Final = Path(__file__).resolve().parents[1]
 INSTALLER: Final = ROOT / "docker/openclaw/install-officecli.sh"
 PINS: Final = {
-    "amd64": "9ee41d5558caea7bcd5aab1b3e76b2bd70f0535f09cf65dda3668130510cc719",
-    "arm64": "b1d5e74d93a8471a47b037cc7774ac29c559940e226f99b9fdf788966cc395b8",
+    "amd64": "92d9aeed324d91ed2a107f7f8dc7468829b14390a66cf2bbdfb25c40beac50ea",
+    "arm64": "a27778548f2820771f54a70887af3c3ec214fe60e63b32836b09b3f3e2c4c493",
 }
 SKILL_PIN: Final = "c950d285ce60021712b4753fb2d9f592308d5622bab776229061dfecb1ce55d4"
 
@@ -80,8 +80,8 @@ def test_pinned_artifacts_install_for_each_target(install_fixture: tuple[Path, d
     assert (root / "npm root/openclaw/skills/officecli/SKILL.md").stat().st_mode & 0o777 == 0o644
     lines = Path(environment["CURL_LOG"]).read_text().splitlines()
     assert len(lines) == 2
-    assert lines[0].endswith(f"/v1.0.158/{asset}")
-    assert lines[1].endswith("/v1.0.158/SKILL.md")
+    assert lines[0].endswith(f"/v1.0.159/{asset}")
+    assert lines[1].endswith("/v1.0.159/SKILL.md")
     for line in lines:
         assert line.startswith("--disable --config /dev/null ")
         assert "--proto =https --proto-redir =https" in line
@@ -118,7 +118,7 @@ def test_unsupported_target_fails_without_download(install_fixture: tuple[Path, 
 
 def test_committed_pins_are_not_overridable() -> None:
     source = INSTALLER.read_text()
-    assert 'OFFICECLI_TAG="v1.0.158"' in source
+    assert 'OFFICECLI_TAG="v1.0.159"' in source
     for arch, pin in PINS.items():
         assert f'OFFICECLI_{arch.upper()}_SHA256="{pin}"' in source
     assert f'OFFICECLI_SKILL_SHA256="{SKILL_PIN}"' in source

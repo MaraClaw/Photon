@@ -22,3 +22,53 @@ jobs:
           enable-cache: true
       - name: Test image contracts
         run: uv run --extra dev pytest
+
+  validator-qa:
+    name: Validator Docker QA (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      OPENCLAW_PLATFORM: linux/${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.6"
+          enable-cache: true
+      - name: Build OpenClaw image
+        shell: uv run --extra dev python {0}
+        run: |
+          import os
+          from pywhales import docker
+
+          docker.buildx.build(
+              ".",
+              platforms=[os.environ["OPENCLAW_PLATFORM"]],
+              load=True,
+              file="Dockerfile.openclaw",
+              tags="openclaw:ci",
+              progress="plain",
+          )
+      - name: Test OpenClaw image startup validators
+        shell: uv run --extra dev python {0}
+        run: |
+          import os
+          from pywhales import docker
+
+          print(docker.run(
+              "openclaw:ci",
+              ["openclaw", "--version"],
+              remove=True,
+              networks=["none"],
+              platform=os.environ["OPENCLAW_PLATFORM"],
+          ), end="")

@@ -6,3 +6,5 @@
 !docker/openclaw/install-gogcli-skills.sh
 !docker/openclaw/install-soul-guardian.sh
 !docker/openclaw/validate-gogcli.sh
+!docker/openclaw/validate-officecli.sh
+!docker/openclaw/validate-soul-guardian.sh

@@ -5,7 +5,7 @@ requires-python = ">=3.14.8"
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=9.1.1"]
+dev = ["pytest>=9.1.1", "pywhales>=0.3.1"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

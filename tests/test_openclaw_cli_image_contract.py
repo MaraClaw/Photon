@@ -12,12 +12,19 @@ def test_image_installs_pinned_cli_and_runs_validator_as_entrypoint() -> None:
     lines = source.splitlines()
     entrypoint = next(line for line in lines if line.startswith("ENTRYPOINT "))
     command = next(line for line in lines if line.startswith("CMD "))
-    assert json.loads(entrypoint.removeprefix("ENTRYPOINT ")) == ["tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh"]
+    assert json.loads(entrypoint.removeprefix("ENTRYPOINT ")) == [
+        "tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh",
+        "/usr/local/bin/validate-officecli.sh", "/usr/local/bin/validate-soul-guardian.sh",
+    ]
     assert json.loads(command.removeprefix("CMD ")) == ["openclaw", "gateway"]
     assert "COPY docker/openclaw/install-officecli.sh /tmp/install-officecli.sh" in lines
     assert "RUN sh /tmp/install-officecli.sh && rm /tmp/install-officecli.sh" in lines
     assert "COPY docker/openclaw/validate-gogcli.sh /usr/local/bin/validate-gogcli.sh" in lines
     assert "RUN chmod 0755 /usr/local/bin/validate-gogcli.sh" in lines
+    for name in ("officecli", "soul-guardian"):
+        assert f"COPY docker/openclaw/validate-{name}.sh /usr/local/bin/validate-{name}.sh" in lines
+        assert f"!docker/openclaw/validate-{name}.sh" in (DOCKERFILE.parent / ".dockerignore").read_text().splitlines()
+    assert "RUN chmod 0755 /usr/local/bin/validate-officecli.sh /usr/local/bin/validate-soul-guardian.sh" in lines
     path = next(line for line in lines if line.startswith("ENV PATH="))
     assert "/usr/local/bin" in path.split()[1].removeprefix("PATH=").split(":")
     assert source.index("RUN sh /tmp/install-officecli.sh") < source.index("USER node")
