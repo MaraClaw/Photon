@@ -1,0 +1,6 @@
+**
+!Dockerfile.openclaw
+!docker/
+!docker/openclaw/
+!docker/openclaw/bootstrap-officecli.sh
+!docker/openclaw/validate-gogcli.sh
