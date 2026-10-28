@@ -1,12 +1,26 @@
 import json
 import os
+import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+from openclaw_probe_test_support import (
+    INVALID_POLICY, POLICY_KEYS, clean_policy, exercise_final_child,
+    exercise_invalid_policy, exercise_script_lookup, exercise_signal, exercise_success_cleanup, exercise_timeout, install_hang,
+)
+
 VALIDATORS = Path(__file__).resolve().parents[1] / "docker/openclaw"
+
+
+@pytest.mark.parametrize("local", [False, True])
+@pytest.mark.parametrize("invalid", [False, True])
+def test_cli_slashless_script_lookup(cli_validator: tuple[Path, dict[str, str], str], tmp_path: Path, local: bool, invalid: bool) -> None:
+    script, env, _ = cli_validator
+    exercise_script_lookup((script, env), tmp_path, (local, invalid))
 
 
 def make_validator(tmp_path: Path, name: str) -> tuple[Path, dict[str, str]]:
@@ -24,7 +38,11 @@ def make_validator(tmp_path: Path, name: str) -> tuple[Path, dict[str, str]]:
     (skill_dir / "SKILL.md").write_text("installed skill\n")
     script = tmp_path / "validator with spaces.sh"
     script.write_text((VALIDATORS / f"validate-{name if name == 'officecli' else 'gogcli'}.sh").read_text().replace(f"/usr/local/bin/{name}", str(binary)))
+    for helper in ("startup-probe.sh", "startup-probe.py"):
+        if (VALIDATORS / helper).exists():
+            shutil.copy2(VALIDATORS / helper, tmp_path / helper)
     env = os.environ.copy()
+    clean_policy(env)
     for key in ("GOG_HOME", "GOG_KEYRING_PASSWORD_FILE", "GOG_KEYRING_PASSWORD", "NPM_STATUS"):
         env.pop(key, None)
     env.update({"PROBE_LOG": str(tmp_path / "probes"), "CHILD_LOG": str(tmp_path / "child"), "NPM_ROOT": str(npm_root), "PATH": f'{bin_dir}{os.pathsep}{env["PATH"]}'})
@@ -174,3 +192,46 @@ def test_restart_rechecks_each_cli(cli_validator: tuple[Path, dict[str, str], st
     result = run_validator((script, env), "/bin/sh", "-c", 'touch "$CHILD_LOG"')
     assert result.returncode != 0
     assert not Path(env["CHILD_LOG"]).exists()
+
+
+@pytest.mark.parametrize("probe", ["version", "npm"])
+def test_hanging_cli_probe_times_out(cli_validator: tuple[Path, dict[str, str], str], probe: str) -> None:
+    script, env, name = cli_validator
+    install_hang(script.parent, env, script.parent / "bin with spaces" / (name if probe == "version" else "npm"))
+    exercise_timeout(script, env)
+
+
+@pytest.mark.parametrize("key", POLICY_KEYS)
+@pytest.mark.parametrize("value", INVALID_POLICY)
+def test_invalid_policy_prevents_cli_probes(cli_validator: tuple[Path, dict[str, str], str], key: str, value: str) -> None:
+    script, env, name = cli_validator
+    install_hang(script.parent, env, script.parent / "bin with spaces" / name)
+    exercise_invalid_policy(script, env, key, value)
+
+
+@pytest.mark.parametrize("signum", [signal.SIGHUP, signal.SIGINT, signal.SIGTERM])
+def test_cli_signal_cleans_discovery_group(cli_validator: tuple[Path, dict[str, str], str], signum: int) -> None:
+    script, env, _ = cli_validator
+    install_hang(script.parent, env, script.parent / "bin with spaces/npm")
+    exercise_signal(script, env, signum)
+
+
+def test_cli_restart_times_out_with_old_marker(cli_validator: tuple[Path, dict[str, str], str]) -> None:
+    script, env, name = cli_validator
+    (script.parent / ".gog-version-checked").touch()
+    assert run_validator((script, env), "/bin/sh", "-c", ":").returncode == 0
+    install_hang(script.parent, env, script.parent / "bin with spaces" / name)
+    exercise_timeout(script, env)
+
+
+def test_cli_final_child_outlives_probe_deadlines(cli_validator: tuple[Path, dict[str, str], str]) -> None:
+    script, env, _ = cli_validator
+    env["PROBE_READY"] = str(script.parent / "child-ready")
+    os.mkfifo(env["PROBE_READY"])
+    exercise_final_child(script, env)
+
+
+def test_successful_cli_probe_cleans_residual_descendant(cli_validator: tuple[Path, dict[str, str], str]) -> None:
+    script, env, name = cli_validator
+    install_hang(script.parent, env, script.parent / "bin with spaces" / name)
+    exercise_success_cleanup(script, env)
