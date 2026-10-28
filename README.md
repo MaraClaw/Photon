@@ -6,6 +6,12 @@ The gogcli skill archive is pinned by commit and SHA256 in `docker/openclaw/inst
 
 The image also bundles `soul-guardian` from `prompt-security/clawsec`, including its AGPL-3.0 license. Its source archive commit and SHA256 are pinned in `docker/openclaw/install-soul-guardian.sh`; verify a new archive independently and update both pins together. The checksum verifies the pinned archive, not a publisher signature. Bundling does not initialize a baseline or enable monitoring: review the installed skill's `SKILL.md` and explicitly opt in to baseline creation and monitoring. Its default restore policy can overwrite changed workspace files, and guardian state may contain sensitive snapshots.
 
+## Startup probe policy
+
+Each external validation probe has a 30-second deadline and a 2-second termination grace. Override these with `OPENCLAW_PROBE_TIMEOUT_SECONDS` and `OPENCLAW_PROBE_GRACE_SECONDS`; both must be positive decimal seconds (fractions are allowed, but empty, zero, negative, non-finite, whitespace and exponent forms are rejected before any probe). Invalid policy exits 2, timeout exits 124, and handled HUP, INT or TERM exits 128 plus the signal number. Probe output is suppressed; captured npm metadata and file-backed passwords are private and trailing newlines are stripped.
+
+The shared Python supervisor terminates the probe process group, escalates to KILL after the grace on timeout or cancellation, and reaps owned descendants on Linux. Residual group members are terminated on ordinary completion too. This covers non-daemonizing probes that stay in their process group, not escaped sessions or uninterruptible kernel waits. The final command is executed unchanged, outside the deadline, after supervision and capture files have been removed. Direct validator use requires POSIX sh, Python 3 with `waitid`/`WNOWAIT`, writable temporary storage, and both `startup-probe` helpers beside the validator; Linux also requires working `prctl` subreaper support. Darwin supports process-group termination for host tests; Linux is the descendant-reaping authority.
+
 ## Local build
 
 Copy `.env.example` to `.env` if you want project-local configuration. Both scripts change to the Photon directory and source `.env` by default; assignments in that file override inherited environment variables. Set `ENV_FILE` to an explicit path to source a different file, or to a nonexistent path to use only the process environment and script defaults.
@@ -17,6 +23,24 @@ MARACLAW_OPENCLAW_IMAGE=openclaw:2026.10.8 ./build-openclaw-local-dockerfile.sh
 ```
 
 Set `DOCKER_PLATFORM=linux/amd64` for the other supported target. Keep the OpenClaw version and checksum aligned with the intended image tag.
+
+### Pre-staged auxiliary assets
+
+Online acquisition is the default. To use previously acquired assets, set `OPENCLAW_ASSET_MODE=staged` and `OPENCLAW_ASSET_DIR` to a local directory (paths containing spaces are supported). The local build requires the selected target and publication requires both targets:
+
+```text
+common/officecli-SKILL.md
+common/gogcli-skills.tar.gz
+common/soul-guardian.tar.gz
+linux-amd64/gogcli.tar.gz
+linux-amd64/officecli
+linux-arm64/gogcli.tar.gz
+linux-arm64/officecli
+```
+
+The existing pinned digests are checked before an asset is extracted, installed, or executed. Missing or corrupt staged inputs fail without an online fallback. Buildx provides the directory as the named `openclaw_assets` build context, mounted read-only only during installation; it is not copied into the image or added to the default context. This mode covers auxiliary assets only: base images, apt packages and the OpenClaw npm package may still require network access.
+
+The image generates a root-owned installed-content inventory after installation. Each startup validator checks its own executables and skill trees against this image baseline, including additions, removals and relative symlink changes, before running component code. Validation is offline and runs on every invocation, including direct calls and restarts. It detects drift, not publisher authenticity, and cannot protect against root replacing both assets and inventory.
 
 ## Publish
 
@@ -49,3 +73,12 @@ The real dual-architecture Docker integration smoke is opt-in. It needs Docker b
 ```bash
 RUN_OPENCLAW_OFFICECLI_SMOKE=1 uv run --extra dev pytest tests/test_openclaw_officecli_container_smoke.py
 ```
+
+The dual-platform validator QA additionally exercises normal offline, non-root entrypoint and direct-validator execution:
+
+```bash
+uv run --extra dev python tests/openclaw_validator_qa.py
+OPENCLAW_ASSET_MODE=staged OPENCLAW_ASSET_DIR="/absolute/path/to/staged assets" uv run --extra dev python tests/openclaw_validator_qa.py
+```
+
+Staged validator QA requires the complete two-architecture layout above. Both QA modes need Docker Buildx, both target execution environments, and network access for the remaining build dependencies; staged QA also needs independently acquired inputs matching the pinned digests.

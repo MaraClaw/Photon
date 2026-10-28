@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from test_openclaw_build_script import GOGCLI_AMD64_SHA256, GOGCLI_ARM64_SHA256, install_fake_docker
+from test_openclaw_build_script import GOGCLI_AMD64_SHA256, GOGCLI_ARM64_SHA256, OFFICECLI_PINS, install_fake_docker
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PUBLISH_SCRIPT = REPO_ROOT / "publish-openclaw-local-dockerfile.sh"
@@ -14,6 +14,8 @@ OPENCLAW_VERSION = "2026.10.8"
 def build_env(bin_dir: Path, log_path: Path, missing_env_file: Path) -> dict[str, str]:
     environment = os.environ.copy()
     for key in ("DOCKERHUB_NAMESPACE", "OPENCLAW_PUBLISH_IMAGE", "IMAGE_TAG", "PUSH_LATEST", "DOCKER_PLATFORM"):
+        environment.pop(key, None)
+    for key in OFFICECLI_PINS:
         environment.pop(key, None)
     environment.update(
         ENV_FILE=str(missing_env_file),
@@ -27,6 +29,28 @@ def run_publish_script(environment: dict[str, str]) -> subprocess.CompletedProce
     return subprocess.run(  # noqa: S603 - fixed repository script with Docker replaced by command capture.
         [str(PUBLISH_SCRIPT)], cwd=REPO_ROOT, env=environment, capture_output=True, text=True, check=False
     )
+
+
+@pytest.mark.parametrize("script", [PUBLISH_SCRIPT, REPO_ROOT / "build-openclaw-local-dockerfile.sh"])
+@pytest.mark.parametrize("source", ["default", "process", "file"])
+def test_officecli_pins_are_forwarded_from_selected_source(tmp_path: Path, script: Path, source: str) -> None:
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    env_file = tmp_path / "build.env"
+    environment = build_env(bin_dir, log_path, env_file) | {"DOCKERHUB_NAMESPACE": "acme"}
+    process_pins = {name: f"process-{name}" for name in OFFICECLI_PINS}
+    file_pins = {name: f"file-{name}" for name in OFFICECLI_PINS}
+    if source != "default":
+        environment.update(process_pins)
+    if source == "file":
+        env_file.write_text("".join(f"{name}={value}\n" for name, value in file_pins.items()))
+    expected = {"default": OFFICECLI_PINS, "process": process_pins, "file": file_pins}[source]
+
+    result = subprocess.run([str(script)], cwd=REPO_ROOT, env=environment, capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0, result.stderr
+    args = Path(f"{log_path}.argv").read_bytes().decode().split("\0")[:-1]
+    for name, value in expected.items():
+        assert args[args.index(f"{name}={value}") - 1] == "--build-arg"
 
 
 @pytest.mark.parametrize(
@@ -124,3 +148,28 @@ def test_docker_failure_propagates_without_false_success(tmp_path: Path, script:
     assert len(log_path.read_text().splitlines()) == 1
     assert "Successfully" not in result.stdout
     assert "Published" not in result.stdout
+
+
+@pytest.mark.parametrize("missing", [None, "linux-amd64/officecli", "linux-arm64/gogcli.tar.gz", "common/soul-guardian.tar.gz"])
+def test_staged_publish_requires_both_targets_before_docker(tmp_path: Path, missing: str | None) -> None:
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    assets = tmp_path / "assets with spaces"
+    for name in ("linux-amd64/gogcli.tar.gz", "linux-amd64/officecli", "linux-arm64/gogcli.tar.gz",
+                 "linux-arm64/officecli", "common/officecli-SKILL.md", "common/gogcli-skills.tar.gz", "common/soul-guardian.tar.gz"):
+        if name != missing:
+            path = assets / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+    env = build_env(bin_dir, log_path, tmp_path / "missing.env") | {
+        "DOCKERHUB_NAMESPACE": "acme", "OPENCLAW_ASSET_MODE": "staged", "OPENCLAW_ASSET_DIR": str(assets),
+    }
+    result = run_publish_script(env)
+    if missing is not None:
+        assert result.returncode != 0
+        assert not log_path.exists()
+    else:
+        assert result.returncode == 0, result.stderr
+        args = Path(f"{log_path}.argv").read_bytes().decode().split("\0")[:-1]
+        assert args[args.index("--build-context") + 1] == f"openclaw_assets={assets.resolve()}"
+        assert "OPENCLAW_ASSET_MODE=staged" in args
+        assert "--push" in args and "--load" not in args

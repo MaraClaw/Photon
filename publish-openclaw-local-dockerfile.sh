@@ -15,6 +15,7 @@
 #   IMAGE_TAG               Hub tag                 (default: $OPENCLAW_VERSION)
 #   PUSH_LATEST=1           also tag and push :latest
 #   OPENCLAW_VERSION, OPENCLAW_SHA256, GOGCLI_VERSION, GOGCLI_{AMD64,ARM64}_SHA256
+#   OFFICECLI_VERSION, OFFICECLI_{AMD64,ARM64,SKILL}_SHA256
 #                           same pins as the local build script
 #
 # Requires an existing `docker login` to Docker Hub. This script does not store credentials.
@@ -38,6 +39,10 @@ OPENCLAW_SHA256="${OPENCLAW_SHA256:-sha256:7e36685a0b5fd9c8c3afcfa93ee33fad871f7
 GOGCLI_VERSION="${GOGCLI_VERSION:-0.47.1}"
 GOGCLI_AMD64_SHA256="${GOGCLI_AMD64_SHA256:-sha256:279bc3a03c1919d774e268ef229949f45b753a0e21257f9fb315b05be7a40ea9}"
 GOGCLI_ARM64_SHA256="${GOGCLI_ARM64_SHA256:-sha256:c677ac6abf5e187e987a87fe1b588f454b002a7d7019de81b9e8db02e9e902b6}"
+OFFICECLI_VERSION="${OFFICECLI_VERSION:-v1.0.159}"
+OFFICECLI_ARM64_SHA256="${OFFICECLI_ARM64_SHA256:-a27778548f2820771f54a70887af3c3ec214fe60e63b32836b09b3f3e2c4c493}"
+OFFICECLI_AMD64_SHA256="${OFFICECLI_AMD64_SHA256:-92d9aeed324d91ed2a107f7f8dc7468829b14390a66cf2bbdfb25c40beac50ea}"
+OFFICECLI_SKILL_SHA256="${OFFICECLI_SKILL_SHA256:-c950d285ce60021712b4753fb2d9f592308d5622bab776229061dfecb1ce55d4}"
 IMAGE_TAG="${IMAGE_TAG:-$OPENCLAW_VERSION}"
 
 if [ -n "${OPENCLAW_PUBLISH_IMAGE:-}" ]; then
@@ -67,6 +72,27 @@ if ! printf '%s' "$IMAGE_TAG" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]*$'; then
     exit 2
 fi
 
+ASSET_ARGS=()
+case "${OPENCLAW_ASSET_MODE:-online}" in
+    online) ;;
+    staged)
+        if [ -z "${OPENCLAW_ASSET_DIR:-}" ] || [ ! -d "$OPENCLAW_ASSET_DIR" ]; then
+            echo '[openclaw-publish] OPENCLAW_ASSET_DIR must name an existing directory in staged mode' >&2
+            exit 2
+        fi
+        ASSET_DIR="$(cd "$OPENCLAW_ASSET_DIR" && pwd -P)"
+        for asset in linux-amd64/gogcli.tar.gz linux-amd64/officecli linux-arm64/gogcli.tar.gz linux-arm64/officecli \
+            common/officecli-SKILL.md common/gogcli-skills.tar.gz common/soul-guardian.tar.gz; do
+            if [ ! -f "$ASSET_DIR/$asset" ]; then
+                echo "[openclaw-publish] missing staged asset: $ASSET_DIR/$asset" >&2
+                exit 2
+            fi
+        done
+        ASSET_ARGS=(--build-arg OPENCLAW_ASSET_MODE=staged --build-context "openclaw_assets=$ASSET_DIR")
+        ;;
+    *) echo "[openclaw-publish] invalid OPENCLAW_ASSET_MODE: $OPENCLAW_ASSET_MODE" >&2; exit 2 ;;
+esac
+
 VERSIONED_REF="${PUBLISH_IMAGE}:${IMAGE_TAG}"
 echo "[openclaw-publish] Building linux/amd64,linux/arm64 and pushing $VERSIONED_REF"
 TAGS=(-t "$VERSIONED_REF")
@@ -84,6 +110,11 @@ docker buildx build \
     --build-arg GOGCLI_VERSION="$GOGCLI_VERSION" \
     --build-arg GOGCLI_AMD64_SHA256="$GOGCLI_AMD64_SHA256" \
     --build-arg GOGCLI_ARM64_SHA256="$GOGCLI_ARM64_SHA256" \
+    --build-arg OFFICECLI_VERSION="$OFFICECLI_VERSION" \
+    --build-arg OFFICECLI_ARM64_SHA256="$OFFICECLI_ARM64_SHA256" \
+    --build-arg OFFICECLI_AMD64_SHA256="$OFFICECLI_AMD64_SHA256" \
+    --build-arg OFFICECLI_SKILL_SHA256="$OFFICECLI_SKILL_SHA256" \
+    ${ASSET_ARGS[@]+"${ASSET_ARGS[@]}"} \
     "${TAGS[@]}" \
     --push \
     .

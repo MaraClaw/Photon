@@ -14,6 +14,12 @@ OPENCLAW_SHA256 = "sha256:7e36685a0b5fd9c8c3afcfa93ee33fad871f7c6c8b6e695cae6720
 GOGCLI_VERSION = "0.47.1"
 GOGCLI_ARM64_SHA256 = "sha256:c677ac6abf5e187e987a87fe1b588f454b002a7d7019de81b9e8db02e9e902b6"
 GOGCLI_AMD64_SHA256 = "sha256:279bc3a03c1919d774e268ef229949f45b753a0e21257f9fb315b05be7a40ea9"
+OFFICECLI_PINS = {
+    "OFFICECLI_VERSION": "v1.0.159",
+    "OFFICECLI_ARM64_SHA256": "a27778548f2820771f54a70887af3c3ec214fe60e63b32836b09b3f3e2c4c493",
+    "OFFICECLI_AMD64_SHA256": "92d9aeed324d91ed2a107f7f8dc7468829b14390a66cf2bbdfb25c40beac50ea",
+    "OFFICECLI_SKILL_SHA256": "c950d285ce60021712b4753fb2d9f592308d5622bab776229061dfecb1ce55d4",
+}
 
 
 def install_fake_docker(root: Path) -> tuple[Path, Path]:
@@ -22,7 +28,8 @@ def install_fake_docker(root: Path) -> tuple[Path, Path]:
     log_path = root / "docker.log"
     docker_path = bin_dir / "docker"
     docker_path.write_text(
-        '#!/usr/bin/env sh\nprintf \'%s\\n\' "$*" >> "$DOCKER_FAKE_LOG"\nexit "${DOCKER_FAKE_EXIT:-0}"\n',
+        '#!/usr/bin/env sh\nprintf \'%s\\n\' "$*" >> "$DOCKER_FAKE_LOG"\n'
+        'printf \'%s\\0\' "$@" > "$DOCKER_FAKE_LOG.argv"\nexit "${DOCKER_FAKE_EXIT:-0}"\n',
         encoding="utf-8",
     )
     docker_path.chmod(docker_path.stat().st_mode | stat.S_IXUSR)
@@ -36,12 +43,14 @@ def build_env(bin_dir: Path, log_path: Path, missing_env_file: Path) -> dict[str
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
     env.pop("MARACLAW_OPENCLAW_IMAGE", None)
     env.pop("DOCKER_PLATFORM", None)
+    for name in OFFICECLI_PINS:
+        env.pop(name, None)
     return env
 
 
-def run_build_script(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def run_build_script(env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603 - fixed repository script path under test
-        [str(BUILD_SCRIPT)],
+        [str(BUILD_SCRIPT), *args],
         cwd=REPO_ROOT,
         env=env,
         capture_output=True,
@@ -60,17 +69,23 @@ def test_openclaw_build_script_uses_arm64_platform_by_default(tmp_path: Path) ->
 
     # Then
     assert result.returncode == 0, result.stderr
-    assert "--platform linux/arm64" in log_path.read_text(encoding="utf-8")
+    command = log_path.read_text(encoding="utf-8")
+    assert "--platform linux/arm64" in command
+    assert "-t arm64-openclaw:local --load" in command
 
 
+@pytest.mark.parametrize("architecture", ["amd64", "arm64"])
 @pytest.mark.parametrize("local_image", [None, "", "workspace/openclaw:custom"])
-def test_openclaw_build_script_selects_local_image_when_configured(tmp_path: Path, local_image: str | None) -> None:
+def test_openclaw_build_script_selects_local_image_when_configured(
+    tmp_path: Path, local_image: str | None, architecture: str
+) -> None:
     # Given
     bin_dir, log_path = install_fake_docker(tmp_path)
     env = build_env(bin_dir, log_path, tmp_path / "missing.env")
+    env["DOCKER_PLATFORM"] = f"linux/{architecture}"
     if local_image is not None:
         env["MARACLAW_OPENCLAW_IMAGE"] = local_image
-    expected_image = local_image or "openclaw:local"
+    expected_image = f"{architecture}-{local_image or 'openclaw:local'}"
 
     # When
     result = run_build_script(env)
@@ -83,17 +98,21 @@ def test_openclaw_build_script_selects_local_image_when_configured(tmp_path: Pat
 
 @pytest.mark.parametrize("inherited_image", [None, "process/openclaw:inherited"])
 @pytest.mark.parametrize("file_image", ["workspace/openclaw:from-file", ""])
+@pytest.mark.parametrize("architecture", ["amd64", "arm64"])
 def test_openclaw_build_script_prefers_image_when_env_file_assigns_it(
-    tmp_path: Path, inherited_image: str | None, file_image: str
+    tmp_path: Path, inherited_image: str | None, file_image: str, architecture: str
 ) -> None:
     # Given
     bin_dir, log_path = install_fake_docker(tmp_path)
     env_file = tmp_path / "build.env"
-    env_file.write_text(f'MARACLAW_OPENCLAW_IMAGE="{file_image}"\n', encoding="utf-8")
+    env_file.write_text(
+        f'MARACLAW_OPENCLAW_IMAGE="{file_image}"\nDOCKER_PLATFORM="linux/{architecture}"\n', encoding="utf-8"
+    )
     env = build_env(bin_dir, log_path, env_file)
+    env["DOCKER_PLATFORM"] = "linux/arm64" if architecture == "amd64" else "linux/amd64"
     if inherited_image is not None:
         env["MARACLAW_OPENCLAW_IMAGE"] = inherited_image
-    expected_image = file_image or "openclaw:local"
+    expected_image = f"{architecture}-{file_image or 'openclaw:local'}"
 
     # When
     result = run_build_script(env)
@@ -102,6 +121,36 @@ def test_openclaw_build_script_prefers_image_when_env_file_assigns_it(
     assert result.returncode == 0, result.stderr
     assert f"-t {expected_image} --load" in log_path.read_text(encoding="utf-8")
     assert result.stdout.count(expected_image) == 2
+
+
+@pytest.mark.parametrize("argument", ["--help", "-h"])
+def test_openclaw_build_script_help_bypasses_env_and_docker(tmp_path: Path, argument: str) -> None:
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    env_file = tmp_path / "build.env"
+    env_file.write_text("exit 99\n", encoding="utf-8")
+    env = build_env(bin_dir, log_path, env_file)
+
+    result = run_build_script(env, argument)
+
+    assert result.returncode == 0
+    assert "Usage:" in result.stdout
+    assert not log_path.exists()
+
+
+@pytest.mark.parametrize("arguments", [("--unknown",), ("--help", "--unknown")])
+def test_openclaw_build_script_rejects_unknown_arguments_before_env_and_docker(
+    tmp_path: Path, arguments: tuple[str, ...]
+) -> None:
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    env_file = tmp_path / "build.env"
+    env_file.write_text("exit 99\n", encoding="utf-8")
+    env = build_env(bin_dir, log_path, env_file)
+
+    result = run_build_script(env, *arguments)
+
+    assert result.returncode == 2
+    assert "Usage:" in result.stderr
+    assert not log_path.exists()
 
 
 def test_openclaw_build_script_passes_default_openclaw_version_and_sha(tmp_path: Path) -> None:
@@ -147,6 +196,7 @@ def test_environment_example_pins_openclaw_and_gogcli_releases() -> None:
         "OPENCLAW_VERSION": OPENCLAW_VERSION,
         "OPENCLAW_SHA256": OPENCLAW_SHA256,
         "GOGCLI_VERSION": GOGCLI_VERSION,
+        **OFFICECLI_PINS,
     }
     content = ENV_EXAMPLE.read_text(encoding="utf-8")
 
@@ -303,6 +353,35 @@ def test_openclaw_dockerfile_pins_and_verifies_gogcli_release_archive() -> None:
         '"https://github.com/openclaw/gogcli/releases/download/v${GOGCLI_VERSION}/gogcli_${GOGCLI_VERSION}_${TARGETOS}_${TARGETARCH}.tar.gz"'
         in gogcli_block
     )
-    assert "printf '%s  %s\\n' \"${GOGCLI_SHA256#sha256:}\" /tmp/gogcli.tar.gz" in gogcli_block
+    assert "printf '%s  %s\\n' \"${GOGCLI_SHA256#sha256:}\" \"$GOGCLI_ARCHIVE\"" in gogcli_block
     assert "sha256sum -c /tmp/gogcli.tar.gz.sha256" in gogcli_block
-    assert "tar -xzf /tmp/gogcli.tar.gz -C /usr/local/bin ./gog" in gogcli_block
+    assert 'tar -xzf "$GOGCLI_ARCHIVE" -C /usr/local/bin ./gog' in gogcli_block
+
+
+@pytest.mark.parametrize("architecture", ["amd64", "arm64"])
+def test_staged_local_build_passes_one_named_context_with_spaces(tmp_path: Path, architecture: str) -> None:
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    assets = tmp_path / "assets with spaces"
+    for name in (f"linux-{architecture}/gogcli.tar.gz", f"linux-{architecture}/officecli",
+                 "common/officecli-SKILL.md", "common/gogcli-skills.tar.gz", "common/soul-guardian.tar.gz"):
+        path = assets / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    env_file = tmp_path / "build.env"
+    env_file.write_text(f'OPENCLAW_ASSET_MODE=staged\nOPENCLAW_ASSET_DIR="{assets}"\n')
+    env = build_env(bin_dir, log_path, env_file) | {"DOCKER_PLATFORM": f"linux/{architecture}", "OPENCLAW_ASSET_MODE": "online"}
+    result = run_build_script(env)
+    assert result.returncode == 0, result.stderr
+    args = Path(f"{log_path}.argv").read_bytes().decode().split("\0")[:-1]
+    assert args[args.index("--build-context") + 1] == f"openclaw_assets={assets.resolve()}"
+    assert "OPENCLAW_ASSET_MODE=staged" in args
+    assert "--load" in args and "--push" not in args
+
+
+@pytest.mark.parametrize("mode", ["staged", "invalid"])
+def test_invalid_asset_configuration_rejected_before_build(tmp_path: Path, mode: str) -> None:
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    env = build_env(bin_dir, log_path, tmp_path / "missing.env") | {"OPENCLAW_ASSET_MODE": mode, "OPENCLAW_ASSET_DIR": str(tmp_path)}
+    result = run_build_script(env)
+    assert result.returncode != 0
+    assert not log_path.exists()
