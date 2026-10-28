@@ -25,7 +25,8 @@ def test_image_installs_pinned_cli_and_runs_validator_as_entrypoint() -> None:
     for name in ("officecli", "soul-guardian", "linkup"):
         assert f"COPY docker/openclaw/validate-{name}.sh /usr/local/bin/validate-{name}.sh" in lines
         assert f"!docker/openclaw/validate-{name}.sh" in (DOCKERFILE.parent / ".dockerignore").read_text().splitlines()
-    assert "RUN chmod 0755 /usr/local/bin/validate-officecli.sh /usr/local/bin/validate-soul-guardian.sh /usr/local/bin/validate-linkup.sh" in lines
+    chmod = next(line for line in lines if line.startswith("RUN chmod 0755 /usr/local/bin/validate-officecli.sh"))
+    assert {f"/usr/local/bin/validate-{name}.sh" for name in ("officecli", "soul-guardian", "linkup")} <= set(shlex.split(chmod))
     assert "COPY docker/openclaw/linkup-skills/ /tmp/linkup-skills/" in lines
     assert "COPY docker/openclaw/install-linkup.sh /tmp/install-linkup.sh" in lines
     assert "RUN sh /tmp/install-linkup.sh && rm /tmp/install-linkup.sh" in lines
@@ -43,6 +44,14 @@ def test_image_installs_pinned_cli_and_runs_validator_as_entrypoint() -> None:
     assert "/usr/local/bin" in path.split()[1].removeprefix("PATH=").split(":")
     assert source.index("RUN sh /tmp/install-officecli.sh") < source.index("USER node")
     assert "bootstrap-officecli" not in source
+
+
+def test_image_installs_and_includes_probe_helpers() -> None:
+    lines = DOCKERFILE.read_text().splitlines()
+    allowed = (DOCKERFILE.parent / ".dockerignore").read_text().splitlines()
+    for helper in ("startup-probe.sh", "startup-probe.py"):
+        assert f"COPY docker/openclaw/{helper} /usr/local/bin/{helper}" in lines
+        assert f"!docker/openclaw/{helper}" in allowed
 
 
 def test_officecli_flags_are_effective_for_install_and_gateway() -> None:

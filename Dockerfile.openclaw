@@ -75,7 +75,9 @@ RUN chmod 0755 /usr/local/bin/validate-gogcli.sh
 COPY docker/openclaw/validate-officecli.sh /usr/local/bin/validate-officecli.sh
 COPY docker/openclaw/validate-soul-guardian.sh /usr/local/bin/validate-soul-guardian.sh
 COPY docker/openclaw/validate-linkup.sh /usr/local/bin/validate-linkup.sh
-RUN chmod 0755 /usr/local/bin/validate-officecli.sh /usr/local/bin/validate-soul-guardian.sh /usr/local/bin/validate-linkup.sh
+COPY docker/openclaw/startup-probe.sh /usr/local/bin/startup-probe.sh
+COPY docker/openclaw/startup-probe.py /usr/local/bin/startup-probe.py
+RUN chmod 0755 /usr/local/bin/validate-officecli.sh /usr/local/bin/validate-soul-guardian.sh /usr/local/bin/validate-linkup.sh /usr/local/bin/startup-probe.sh /usr/local/bin/startup-probe.py
 
 USER node
 ENTRYPOINT ["tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh", "/usr/local/bin/validate-officecli.sh", "/usr/local/bin/validate-soul-guardian.sh", "/usr/local/bin/validate-linkup.sh"]
