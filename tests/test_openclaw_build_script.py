@@ -22,7 +22,8 @@ def install_fake_docker(root: Path) -> tuple[Path, Path]:
     log_path = root / "docker.log"
     docker_path = bin_dir / "docker"
     docker_path.write_text(
-        '#!/usr/bin/env sh\nprintf \'%s\\n\' "$*" >> "$DOCKER_FAKE_LOG"\nexit "${DOCKER_FAKE_EXIT:-0}"\n',
+        '#!/usr/bin/env sh\nprintf \'%s\\n\' "$*" >> "$DOCKER_FAKE_LOG"\n'
+        'printf \'%s\\0\' "$@" > "$DOCKER_FAKE_LOG.argv"\nexit "${DOCKER_FAKE_EXIT:-0}"\n',
         encoding="utf-8",
     )
     docker_path.chmod(docker_path.stat().st_mode | stat.S_IXUSR)
@@ -303,6 +304,35 @@ def test_openclaw_dockerfile_pins_and_verifies_gogcli_release_archive() -> None:
         '"https://github.com/openclaw/gogcli/releases/download/v${GOGCLI_VERSION}/gogcli_${GOGCLI_VERSION}_${TARGETOS}_${TARGETARCH}.tar.gz"'
         in gogcli_block
     )
-    assert "printf '%s  %s\\n' \"${GOGCLI_SHA256#sha256:}\" /tmp/gogcli.tar.gz" in gogcli_block
+    assert "printf '%s  %s\\n' \"${GOGCLI_SHA256#sha256:}\" \"$GOGCLI_ARCHIVE\"" in gogcli_block
     assert "sha256sum -c /tmp/gogcli.tar.gz.sha256" in gogcli_block
-    assert "tar -xzf /tmp/gogcli.tar.gz -C /usr/local/bin ./gog" in gogcli_block
+    assert 'tar -xzf "$GOGCLI_ARCHIVE" -C /usr/local/bin ./gog' in gogcli_block
+
+
+@pytest.mark.parametrize("architecture", ["amd64", "arm64"])
+def test_staged_local_build_passes_one_named_context_with_spaces(tmp_path: Path, architecture: str) -> None:
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    assets = tmp_path / "assets with spaces"
+    for name in (f"linux-{architecture}/gogcli.tar.gz", f"linux-{architecture}/officecli",
+                 "common/officecli-SKILL.md", "common/gogcli-skills.tar.gz", "common/soul-guardian.tar.gz"):
+        path = assets / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    env_file = tmp_path / "build.env"
+    env_file.write_text(f'OPENCLAW_ASSET_MODE=staged\nOPENCLAW_ASSET_DIR="{assets}"\n')
+    env = build_env(bin_dir, log_path, env_file) | {"DOCKER_PLATFORM": f"linux/{architecture}", "OPENCLAW_ASSET_MODE": "online"}
+    result = run_build_script(env)
+    assert result.returncode == 0, result.stderr
+    args = Path(f"{log_path}.argv").read_bytes().decode().split("\0")[:-1]
+    assert args[args.index("--build-context") + 1] == f"openclaw_assets={assets.resolve()}"
+    assert "OPENCLAW_ASSET_MODE=staged" in args
+    assert "--load" in args and "--push" not in args
+
+
+@pytest.mark.parametrize("mode", ["staged", "invalid"])
+def test_invalid_asset_configuration_rejected_before_build(tmp_path: Path, mode: str) -> None:
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    env = build_env(bin_dir, log_path, tmp_path / "missing.env") | {"OPENCLAW_ASSET_MODE": mode, "OPENCLAW_ASSET_DIR": str(tmp_path)}
+    result = run_build_script(env)
+    assert result.returncode != 0
+    assert not log_path.exists()

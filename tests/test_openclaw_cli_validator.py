@@ -10,7 +10,7 @@ import pytest
 
 from openclaw_probe_test_support import (
     INVALID_POLICY, POLICY_KEYS, clean_policy, exercise_final_child,
-    exercise_invalid_policy, exercise_script_lookup, exercise_signal, exercise_success_cleanup, exercise_timeout, install_hang,
+    exercise_invalid_policy, exercise_script_lookup, exercise_signal, exercise_success_cleanup, exercise_timeout, install_hang, prepare_integrity, rebaseline,
 )
 
 VALIDATORS = Path(__file__).resolve().parents[1] / "docker/openclaw"
@@ -38,7 +38,7 @@ def make_validator(tmp_path: Path, name: str) -> tuple[Path, dict[str, str]]:
     (skill_dir / "SKILL.md").write_text("installed skill\n")
     script = tmp_path / "validator with spaces.sh"
     script.write_text((VALIDATORS / f"validate-{name if name == 'officecli' else 'gogcli'}.sh").read_text().replace(f"/usr/local/bin/{name}", str(binary)))
-    for helper in ("startup-probe.sh", "startup-probe.py"):
+    for helper in ("startup-probe.sh", "startup-probe.py", "installed-assets.py"):
         if (VALIDATORS / helper).exists():
             shutil.copy2(VALIDATORS / helper, tmp_path / helper)
     env = os.environ.copy()
@@ -46,6 +46,8 @@ def make_validator(tmp_path: Path, name: str) -> tuple[Path, dict[str, str]]:
     for key in ("GOG_HOME", "GOG_KEYRING_PASSWORD_FILE", "GOG_KEYRING_PASSWORD", "NPM_STATUS"):
         env.pop(key, None)
     env.update({"PROBE_LOG": str(tmp_path / "probes"), "CHILD_LOG": str(tmp_path / "child"), "NPM_ROOT": str(npm_root), "PATH": f'{bin_dir}{os.pathsep}{env["PATH"]}'})
+    env[f"INTEGRITY_BINARY_{name.upper()}"] = str(binary.resolve())
+    script = prepare_integrity(tmp_path, skill_dir.parent, env, script)
     return script, env
 
 
@@ -73,10 +75,11 @@ def test_missing_or_broken_cli_blocks_child(cli_validator: tuple[Path, dict[str,
         binary.unlink()
     else:
         binary.write_text('#!/bin/sh\nprintf "%s" "$GOG_KEYRING_PASSWORD" >&2\nexit 37\n')
+        rebaseline(env)
     result = run_validator((script, env), "/bin/sh", "-c", 'touch "$CHILD_LOG"', GOG_KEYRING_PASSWORD="secret-value")
     assert result.returncode != 0
     assert result.stdout == ""
-    assert result.stderr == f"Required CLI failed verification: {binary}\n"
+    assert result.stderr == (f"Installed assets failed verification: {'gogcli' if name == 'gog' else name}\n" if failure == "missing" else f"Required CLI failed verification: {binary}\n")
     assert not Path(env["CHILD_LOG"]).exists()
 
 
@@ -98,7 +101,7 @@ def test_invalid_skill_blocks_child(cli_validator: tuple[Path, dict[str, str], s
     result = run_validator((script, env), "/bin/sh", "-c", 'touch "$CHILD_LOG"', GOG_KEYRING_PASSWORD="secret-value", GOG_KEYRING_PASSWORD_FILE=str(script.parent / "missing-password"))
     assert result.returncode == 1
     assert result.stdout == ""
-    assert result.stderr == f"Required skill failed verification: {name}\n"
+    assert result.stderr == f"Installed assets failed verification: {'gogcli' if name == 'gog' else name}\n"
     assert not Path(env["CHILD_LOG"]).exists()
 
 
@@ -111,7 +114,7 @@ def test_unreadable_skill_blocks_child(cli_validator: tuple[Path, dict[str, str]
     result = run_validator((script, env), "/bin/sh", "-c", 'touch "$CHILD_LOG"', GOG_KEYRING_PASSWORD="secret-value")
     assert result.returncode == 1
     assert result.stdout == ""
-    assert result.stderr == f"Required skill failed verification: {name}\n"
+    assert result.stderr == f"Installed assets failed verification: {'gogcli' if name == 'gog' else name}\n"
     assert not Path(env["CHILD_LOG"]).exists()
 
 
@@ -235,3 +238,31 @@ def test_successful_cli_probe_cleans_residual_descendant(cli_validator: tuple[Pa
     script, env, name = cli_validator
     install_hang(script.parent, env, script.parent / "bin with spaces" / name)
     exercise_success_cleanup(script, env)
+
+
+@pytest.mark.parametrize("asset", ["binary", "skill"])
+def test_valid_looking_tampering_blocks_cli_before_any_probe(cli_validator: tuple[Path, dict[str, str], str], asset: str) -> None:
+    script, env, name = cli_validator
+    path = script.parent / "bin with spaces" / name if asset == "binary" else Path(env["NPM_ROOT"]) / "openclaw/skills" / ("crabbox" if name == "gog" else name) / ("fixture" if name == "gog" else "SKILL.md")
+    path.write_text("#!/bin/sh\nexit 0\n" if asset == "binary" else "valid skill content\n")
+    result = run_validator((script, env), "/bin/sh", "-c", 'touch "$CHILD_LOG"')
+    assert result.returncode == 1
+    assert not Path(env["PROBE_LOG"]).exists()
+    assert not Path(env["CHILD_LOG"]).exists()
+
+
+def test_untouched_cli_restart_uses_same_inventory(cli_validator: tuple[Path, dict[str, str], str]) -> None:
+    script, env, name = cli_validator
+    for _ in range(2):
+        assert run_validator((script, env), "/bin/sh", "-c", ":").returncode == 0
+    assert Path(env["PROBE_LOG"]).read_text().splitlines() == [f"{name}:--version"] * 2
+
+
+def test_discovery_cannot_redirect_cli_to_unverified_skills(cli_validator: tuple[Path, dict[str, str], str], tmp_path: Path) -> None:
+    script, env, name = cli_validator
+    other = tmp_path / "other/openclaw/skills" / name
+    other.mkdir(parents=True)
+    (other / "SKILL.md").write_text("valid skill\n")
+    result = run_validator((script, env), "/bin/sh", "-c", 'touch "$CHILD_LOG"', NPM_ROOT=str(other.parents[2]))
+    assert result.returncode == 1
+    assert not Path(env["CHILD_LOG"]).exists()

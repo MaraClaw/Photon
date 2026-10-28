@@ -105,4 +105,61 @@ def test_docker_context_includes_both_build_installers() -> None:
     for name in ("install-officecli.sh", "install-gogcli-skills.sh"):
         assert f"!docker/openclaw/{name}" in ignore
         assert f"COPY docker/openclaw/{name} /tmp/{name}" in dockerfile
-        assert f"RUN sh /tmp/{name} && rm /tmp/{name}" in dockerfile
+        assert f"sh /tmp/{name}" in dockerfile
+        assert f"rm /tmp/{name}" in dockerfile
+
+
+def test_local_archive_records_installed_roots_without_network(install_fixture: tuple[Path, dict[str, str]]) -> None:
+    script, env = install_fixture
+    ownership = script.parent / "owned roots.txt"
+    result = subprocess.run(
+        ["sh", str(script), "--archive-file", env["ARCHIVE"], "--ownership-output", str(ownership)],
+        env=env, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert set(ownership.read_text().splitlines()) == {"gog", "gog-calendar", "crabbox"}
+    assert not Path(env["CURL_LOG"]).exists()
+
+
+@pytest.mark.parametrize("failure", ["missing", "digest"])
+def test_bad_local_archive_preserves_ownership_without_network(install_fixture: tuple[Path, dict[str, str]], failure: str) -> None:
+    script, env = install_fixture
+    ownership = script.parent / "owned roots.txt"
+    ownership.write_text("previous\n")
+    archive = Path(env["ARCHIVE"]) if failure == "digest" else script.parent / "missing"
+    if failure == "digest":
+        archive.write_bytes(b"bad")
+    result = subprocess.run(["sh", str(script), "--archive-file", str(archive), "--ownership-output", str(ownership)],
+                            env=env, capture_output=True, text=True, check=False)
+    assert result.returncode != 0
+    assert ownership.read_text() == "previous\n"
+    assert not Path(env["CURL_LOG"]).exists()
+
+
+def test_ownership_output_is_preserved_when_installation_fails(install_fixture: tuple[Path, dict[str, str]]) -> None:
+    script, env = install_fixture
+    ownership = script.parent / "owned roots.txt"
+    ownership.write_text("previous\n")
+    chmod = script.parent / "bin/chmod"
+    chmod.write_text('#!/bin/sh\nexit 1\n')
+    chmod.chmod(0o755)
+    result = subprocess.run(["sh", str(script), "--archive-file", env["ARCHIVE"], "--ownership-output", str(ownership)],
+                            env=env, capture_output=True, text=True, check=False)
+    assert result.returncode != 0
+    assert ownership.read_text() == "previous\n"
+
+
+def test_unsafe_skill_name_is_not_recorded(install_fixture: tuple[Path, dict[str, str]]) -> None:
+    script, env = install_fixture
+    archive = Path(env["ARCHIVE"])
+    original_digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    skills = script.parent / f"gogcli-{COMMIT}/.agents/skills"
+    (skills / "unsafe\nname").mkdir()
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.add(skills, arcname=f"gogcli-{COMMIT}/.agents/skills")
+    script.write_text(script.read_text().replace(original_digest, hashlib.sha256(archive.read_bytes()).hexdigest()))
+    ownership = script.parent / "owned roots.txt"
+    result = subprocess.run(["sh", str(script), "--archive-file", str(archive), "--ownership-output", str(ownership)],
+                            env=env, capture_output=True, text=True, check=False)
+    assert result.returncode != 0
+    assert not ownership.exists()

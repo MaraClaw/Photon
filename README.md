@@ -24,6 +24,24 @@ MARACLAW_OPENCLAW_IMAGE=openclaw:2026.10.8 ./build-openclaw-local-dockerfile.sh
 
 Set `DOCKER_PLATFORM=linux/amd64` for the other supported target. Keep the OpenClaw version and checksum aligned with the intended image tag.
 
+### Pre-staged auxiliary assets
+
+Online acquisition is the default. To use previously acquired assets, set `OPENCLAW_ASSET_MODE=staged` and `OPENCLAW_ASSET_DIR` to a local directory (paths containing spaces are supported). The local build requires the selected target and publication requires both targets:
+
+```text
+common/officecli-SKILL.md
+common/gogcli-skills.tar.gz
+common/soul-guardian.tar.gz
+linux-amd64/gogcli.tar.gz
+linux-amd64/officecli
+linux-arm64/gogcli.tar.gz
+linux-arm64/officecli
+```
+
+The existing pinned digests are checked before an asset is extracted, installed, or executed. Missing or corrupt staged inputs fail without an online fallback. Buildx provides the directory as the named `openclaw_assets` build context, mounted read-only only during installation; it is not copied into the image or added to the default context. This mode covers auxiliary assets only: base images, apt packages and the OpenClaw npm package may still require network access.
+
+The image generates a root-owned installed-content inventory after installation. Each startup validator checks its own executables and skill trees against this image baseline, including additions, removals and relative symlink changes, before running component code. Validation is offline and runs on every invocation, including direct calls and restarts. It detects drift, not publisher authenticity, and cannot protect against root replacing both assets and inventory.
+
 ## Publish
 
 After `docker login`, publish both architectures under one versioned tag:
@@ -55,3 +73,12 @@ The real dual-architecture Docker integration smoke is opt-in. It needs Docker b
 ```bash
 RUN_OPENCLAW_OFFICECLI_SMOKE=1 uv run --extra dev pytest tests/test_openclaw_officecli_container_smoke.py
 ```
+
+The dual-platform validator QA additionally exercises normal offline, non-root entrypoint and direct-validator execution:
+
+```bash
+uv run --extra dev python tests/openclaw_validator_qa.py
+OPENCLAW_ASSET_MODE=staged OPENCLAW_ASSET_DIR="/absolute/path/to/staged assets" uv run --extra dev python tests/openclaw_validator_qa.py
+```
+
+Staged validator QA requires the complete two-architecture layout above. Both QA modes need Docker Buildx, both target execution environments, and network access for the remaining build dependencies; staged QA also needs independently acquired inputs matching the pinned digests.

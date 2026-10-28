@@ -12,7 +12,7 @@ import pytest
 
 from openclaw_probe_test_support import (
     INVALID_POLICY, POLICY_KEYS, clean_policy, exercise_final_child,
-    exercise_invalid_policy, exercise_script_lookup, exercise_signal, exercise_timeout, install_hang,
+    exercise_invalid_policy, exercise_script_lookup, exercise_signal, exercise_timeout, install_hang, prepare_integrity, rebaseline,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,7 +31,7 @@ VALID_METADATA = 'metadata: {"openclaw":{"requires":{"env":["LINKUP_API_BASE","L
 @pytest.mark.parametrize("invalid", [False, True])
 def test_linkup_slashless_script_lookup(installation: tuple[Path, dict[str, str]], tmp_path: Path, local: bool, invalid: bool) -> None:
     _, env = installation
-    exercise_script_lookup((VALIDATOR, env), tmp_path, (local, invalid))
+    exercise_script_lookup((Path(env["VALIDATOR"]), env), tmp_path, (local, invalid))
 
 
 @pytest.fixture
@@ -50,6 +50,7 @@ def installation(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     env.pop("LINKUP_API_BASE", None)
     env.pop("LINKUP_PROXY_TOKEN", None)
     clean_policy(env)
+    prepare_integrity(tmp_path, skills, env, VALIDATOR)
     return skills, env
 
 
@@ -97,7 +98,7 @@ def test_valid_installation_executes_command_with_original_arguments_and_status(
     arguments = ["space value", "", "$(literal);*", "--flag=value"]
     before = {path.relative_to(skills): path.read_bytes() for path in skills.rglob("*") if path.is_file()}
     result = subprocess.run(
-        ["/bin/sh", str(VALIDATOR), sys.executable, "-c", "import json,sys; print(json.dumps(sys.argv[2:])); sys.exit(int(sys.argv[1]))", str(exit_code), *arguments],
+        ["/bin/sh", env["VALIDATOR"], sys.executable, "-c", "import json,sys; print(json.dumps(sys.argv[2:])); sys.exit(int(sys.argv[1]))", str(exit_code), *arguments],
         env=env, capture_output=True, text=True, check=False,
     )
     assert result.returncode == exit_code
@@ -122,9 +123,11 @@ def test_invalid_skill_blocks_command(installation: tuple[Path, dict[str, str]],
     else:
         description = {"empty-description": "# missing", "invalid-description": "[", "null-description": "null"}[failure]
         file.write_text(f"---\nname: {name}\ndescription: {description}\n{VALID_METADATA}\n---\n")
-    result = subprocess.run(["/bin/sh", str(VALIDATOR), "/bin/false"], env=env, capture_output=True, text=True, check=False)
+    if failure != "missing":
+        rebaseline(env)
+    result = subprocess.run(["/bin/sh", env["VALIDATOR"], "/bin/false"], env=env, capture_output=True, text=True, check=False)
     assert result.returncode == 1
-    assert result.stderr == f"Required skill failed verification: {name}\n"
+    assert result.stderr == ("Installed assets failed verification: linkup\n" if failure == "missing" else f"Required skill failed verification: {name}\n")
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -145,7 +148,8 @@ def test_invalid_metadata_blocks_command(
     skills, env = installation
     file = skills / name / "SKILL.md"
     file.write_text(f"---\nname: {name}\ndescription: description\n{metadata + chr(10) if metadata else ''}---\n")
-    result = subprocess.run(["/bin/sh", str(VALIDATOR), sys.executable, "-c", "pass"], env=env, capture_output=True, text=True, check=False)
+    rebaseline(env)
+    result = subprocess.run(["/bin/sh", env["VALIDATOR"], sys.executable, "-c", "pass"], env=env, capture_output=True, text=True, check=False)
     assert result.returncode == 1
     assert result.stderr == f"Required skill failed verification: {name}\n"
 
@@ -154,7 +158,8 @@ def test_valid_metadata_with_additional_env_executes_command(installation: tuple
     skills, env = installation
     file = skills / NAMES[0] / "SKILL.md"
     file.write_text('---\nname: linkup-search\ndescription: description\nmetadata: {"openclaw": {"requires": {"env": ["OTHER", "LINKUP_PROXY_TOKEN", "LINKUP_API_BASE"]}}}\n---\n')
-    result = subprocess.run(["/bin/sh", str(VALIDATOR), sys.executable, "-c", "pass"], env=env, capture_output=True, text=True, check=False)
+    rebaseline(env)
+    result = subprocess.run(["/bin/sh", env["VALIDATOR"], sys.executable, "-c", "pass"], env=env, capture_output=True, text=True, check=False)
     assert result.returncode == 0
     assert result.stderr == ""
 
@@ -170,16 +175,18 @@ def test_invalid_reference_blocks_command(
         file.unlink()
     else:
         file.write_text("")
-    result = subprocess.run(["/bin/sh", str(VALIDATOR), "/bin/false"], env=env, capture_output=True, text=True, check=False)
+    if failure == "empty":
+        rebaseline(env)
+    result = subprocess.run(["/bin/sh", env["VALIDATOR"], "/bin/false"], env=env, capture_output=True, text=True, check=False)
     assert result.returncode == 1
-    assert result.stderr == f"Required skill failed verification: {name}\n"
+    assert result.stderr == ("Installed assets failed verification: linkup\n" if failure == "missing" else f"Required skill failed verification: {name}\n")
 
 
 @pytest.mark.parametrize("failure", ["npm-failure", "empty-root"])
 def test_npm_discovery_failure_blocks_command(installation: tuple[Path, dict[str, str]], failure: str) -> None:
     _, env = installation
     env["NPM_FAIL" if failure == "npm-failure" else "NPM_ROOT"] = "1" if failure == "npm-failure" else ""
-    result = subprocess.run(["/bin/sh", str(VALIDATOR), "/bin/false"], env=env, capture_output=True, text=True, check=False)
+    result = subprocess.run(["/bin/sh", env["VALIDATOR"], "/bin/false"], env=env, capture_output=True, text=True, check=False)
     assert result.returncode == 1
     assert result.stderr == "Required skill failed verification: linkup\n"
 
@@ -189,7 +196,7 @@ def test_linkup_hanging_probe_times_out(installation: tuple[Path, dict[str, str]
     skills, env = installation
     root = skills.parents[2]
     install_hang(root, env, root / "bin" / probe, python_probe="compile" if probe == "python3" else "")
-    exercise_timeout(VALIDATOR, env)
+    exercise_timeout(Path(env["VALIDATOR"]), env)
 
 
 @pytest.mark.parametrize("key", POLICY_KEYS)
@@ -198,7 +205,7 @@ def test_invalid_policy_prevents_linkup_probes(installation: tuple[Path, dict[st
     skills, env = installation
     root = skills.parents[2]
     install_hang(root, env, root / "bin/npm")
-    exercise_invalid_policy(VALIDATOR, env, key, value)
+    exercise_invalid_policy(Path(env["VALIDATOR"]), env, key, value)
 
 
 @pytest.mark.parametrize("signum", [signal.SIGHUP, signal.SIGINT, signal.SIGTERM])
@@ -206,20 +213,39 @@ def test_linkup_signal_cleans_parsing_group(installation: tuple[Path, dict[str, 
     skills, env = installation
     root = skills.parents[2]
     install_hang(root, env, root / "bin/awk")
-    exercise_signal(VALIDATOR, env, signum)
+    exercise_signal(Path(env["VALIDATOR"]), env, signum)
 
 
 def test_linkup_restart_rechecks_hanging_probe(installation: tuple[Path, dict[str, str]]) -> None:
     skills, env = installation
     root = skills.parents[2]
-    assert subprocess.run(["/bin/sh", str(VALIDATOR), "/bin/sh", "-c", ":"], env=env, timeout=5, check=False).returncode == 0
+    assert subprocess.run(["/bin/sh", env["VALIDATOR"], "/bin/sh", "-c", ":"], env=env, timeout=5, check=False).returncode == 0
     (root / ".linkup-checked").touch()
     install_hang(root, env, root / "bin/npm")
-    exercise_timeout(VALIDATOR, env)
+    exercise_timeout(Path(env["VALIDATOR"]), env)
 
 
 def test_linkup_final_child_outlives_probe_deadlines(installation: tuple[Path, dict[str, str]]) -> None:
     skills, env = installation
     env["PROBE_READY"] = str(skills.parents[2] / "child-ready")
     os.mkfifo(env["PROBE_READY"])
-    exercise_final_child(VALIDATOR, env)
+    exercise_final_child(Path(env["VALIDATOR"]), env)
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_linkup_reference_tampering_prevents_discovery(installation: tuple[Path, dict[str, str]], name: str) -> None:
+    skills, env = installation
+    (skills / name / "references" / REFERENCES[name][0]).write_text("valid-looking reference\n")
+    marker = skills.parent / "npm-ran"
+    npm = Path(env["PATH"].split(os.pathsep)[0]) / "npm"
+    npm.write_text(f'#!/bin/sh\ntouch "{marker}"\nexit 0\n')
+    result = subprocess.run(["/bin/sh", env["VALIDATOR"], "/bin/sh", "-c", 'touch "$NPM_ROOT/child"'], env=env, capture_output=True, text=True, check=False)
+    assert result.returncode == 1
+    assert not marker.exists()
+    assert not (Path(env["NPM_ROOT"]) / "child").exists()
+
+
+def test_untouched_linkup_restart_uses_same_inventory(installation: tuple[Path, dict[str, str]]) -> None:
+    _, env = installation
+    for _ in range(2):
+        assert subprocess.run(["/bin/sh", env["VALIDATOR"], "/bin/sh", "-c", ":"], env=env, capture_output=True, text=True, check=False).returncode == 0

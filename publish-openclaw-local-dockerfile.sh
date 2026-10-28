@@ -67,6 +67,27 @@ if ! printf '%s' "$IMAGE_TAG" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]*$'; then
     exit 2
 fi
 
+ASSET_ARGS=()
+case "${OPENCLAW_ASSET_MODE:-online}" in
+    online) ;;
+    staged)
+        if [ -z "${OPENCLAW_ASSET_DIR:-}" ] || [ ! -d "$OPENCLAW_ASSET_DIR" ]; then
+            echo '[openclaw-publish] OPENCLAW_ASSET_DIR must name an existing directory in staged mode' >&2
+            exit 2
+        fi
+        ASSET_DIR="$(cd "$OPENCLAW_ASSET_DIR" && pwd -P)"
+        for asset in linux-amd64/gogcli.tar.gz linux-amd64/officecli linux-arm64/gogcli.tar.gz linux-arm64/officecli \
+            common/officecli-SKILL.md common/gogcli-skills.tar.gz common/soul-guardian.tar.gz; do
+            if [ ! -f "$ASSET_DIR/$asset" ]; then
+                echo "[openclaw-publish] missing staged asset: $ASSET_DIR/$asset" >&2
+                exit 2
+            fi
+        done
+        ASSET_ARGS=(--build-arg OPENCLAW_ASSET_MODE=staged --build-context "openclaw_assets=$ASSET_DIR")
+        ;;
+    *) echo "[openclaw-publish] invalid OPENCLAW_ASSET_MODE: $OPENCLAW_ASSET_MODE" >&2; exit 2 ;;
+esac
+
 VERSIONED_REF="${PUBLISH_IMAGE}:${IMAGE_TAG}"
 echo "[openclaw-publish] Building linux/amd64,linux/arm64 and pushing $VERSIONED_REF"
 TAGS=(-t "$VERSIONED_REF")
@@ -84,6 +105,7 @@ docker buildx build \
     --build-arg GOGCLI_VERSION="$GOGCLI_VERSION" \
     --build-arg GOGCLI_AMD64_SHA256="$GOGCLI_AMD64_SHA256" \
     --build-arg GOGCLI_ARM64_SHA256="$GOGCLI_ARM64_SHA256" \
+    ${ASSET_ARGS[@]+"${ASSET_ARGS[@]}"} \
     "${TAGS[@]}" \
     --push \
     .

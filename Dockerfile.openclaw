@@ -1,5 +1,6 @@
 ARG OPENCLAW_BASE_IMAGE_AMD64=nikolaik/python-nodejs@sha256:0081cd01c832e6db2ddb040a3dd4c7d282c4068c57a39280c6a40b2853ec000e
 ARG OPENCLAW_BASE_IMAGE_ARM64=nikolaik/python-nodejs@sha256:0d79217e1afd8ec1657305749dc3eb187963ab7934e35f89ac40c5bb4a165f07
+FROM scratch AS openclaw_assets
 FROM ${OPENCLAW_BASE_IMAGE_AMD64} AS base_amd64
 FROM ${OPENCLAW_BASE_IMAGE_ARM64} AS base_arm64
 FROM base_${TARGETARCH}
@@ -7,6 +8,7 @@ SHELL ["/bin/sh", "-c"]
 
 ARG TARGETOS
 ARG TARGETARCH
+ARG OPENCLAW_ASSET_MODE=online
 ARG OPENCLAW_VERSION=2026.10.8
 ARG OPENCLAW_SHA256=sha256:7e36685a0b5fd9c8c3afcfa93ee33fad871f7c6c8b6e695cae6720d14a765f18
 ARG TINI_VERSION=0.19.0-3+b8
@@ -42,17 +44,21 @@ RUN apt-get update \
 RUN groupmod -n node pn \
     && usermod -l node -d /home/node -m pn
 
-RUN case "$TARGETOS/$TARGETARCH" in \
+RUN --mount=type=bind,from=openclaw_assets,target=/staged case "$TARGETOS/$TARGETARCH" in \
         linux/amd64) GOGCLI_SHA256="$GOGCLI_AMD64_SHA256" ;; \
         linux/arm64) GOGCLI_SHA256="$GOGCLI_ARM64_SHA256" ;; \
         *) printf 'unsupported guest target: %s/%s\n' "$TARGETOS" "$TARGETARCH" >&2; exit 2 ;; \
     esac \
-    && curl -fsSL \
-    "https://github.com/openclaw/gogcli/releases/download/v${GOGCLI_VERSION}/gogcli_${GOGCLI_VERSION}_${TARGETOS}_${TARGETARCH}.tar.gz" \
-    -o /tmp/gogcli.tar.gz \
-    && printf '%s  %s\n' "${GOGCLI_SHA256#sha256:}" /tmp/gogcli.tar.gz > /tmp/gogcli.tar.gz.sha256 \
+    && case "$OPENCLAW_ASSET_MODE" in \
+        online) curl -fsSL \
+            "https://github.com/openclaw/gogcli/releases/download/v${GOGCLI_VERSION}/gogcli_${GOGCLI_VERSION}_${TARGETOS}_${TARGETARCH}.tar.gz" \
+            -o /tmp/gogcli.tar.gz && GOGCLI_ARCHIVE=/tmp/gogcli.tar.gz ;; \
+        staged) GOGCLI_ARCHIVE="/staged/linux-${TARGETARCH}/gogcli.tar.gz" ;; \
+        *) printf 'unsupported OPENCLAW_ASSET_MODE: %s\n' "$OPENCLAW_ASSET_MODE" >&2; exit 2 ;; \
+    esac \
+    && printf '%s  %s\n' "${GOGCLI_SHA256#sha256:}" "$GOGCLI_ARCHIVE" > /tmp/gogcli.tar.gz.sha256 \
     && sha256sum -c /tmp/gogcli.tar.gz.sha256 \
-    && tar -xzf /tmp/gogcli.tar.gz -C /usr/local/bin ./gog \
+    && tar -xzf "$GOGCLI_ARCHIVE" -C /usr/local/bin ./gog \
     && chmod 0755 /usr/local/bin/gog \
     && rm -f /tmp/gogcli.tar.gz /tmp/gogcli.tar.gz.sha256 \
     && gog --version
@@ -62,14 +68,35 @@ ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     OFFICECLI_NO_AUTO_RESIDENT=1
 
 COPY docker/openclaw/install-officecli.sh /tmp/install-officecli.sh
-RUN sh /tmp/install-officecli.sh && rm /tmp/install-officecli.sh
+RUN --mount=type=bind,from=openclaw_assets,target=/staged \
+    case "$OPENCLAW_ASSET_MODE" in \
+        online) sh /tmp/install-officecli.sh ;; \
+        staged) sh /tmp/install-officecli.sh --binary-file "/staged/linux-${TARGETARCH}/officecli" --skill-file /staged/common/officecli-SKILL.md ;; \
+        *) exit 2 ;; \
+    esac && rm /tmp/install-officecli.sh
 COPY docker/openclaw/install-gogcli-skills.sh /tmp/install-gogcli-skills.sh
-RUN sh /tmp/install-gogcli-skills.sh && rm /tmp/install-gogcli-skills.sh
+RUN --mount=type=bind,from=openclaw_assets,target=/staged \
+    install -d -m 0755 /usr/local/share/openclaw-integrity \
+    && case "$OPENCLAW_ASSET_MODE" in \
+        online) sh /tmp/install-gogcli-skills.sh --ownership-output /usr/local/share/openclaw-integrity/gog-skill-roots.txt ;; \
+        staged) sh /tmp/install-gogcli-skills.sh --archive-file /staged/common/gogcli-skills.tar.gz --ownership-output /usr/local/share/openclaw-integrity/gog-skill-roots.txt ;; \
+        *) exit 2 ;; \
+    esac && rm /tmp/install-gogcli-skills.sh
 COPY docker/openclaw/install-soul-guardian.sh /tmp/install-soul-guardian.sh
-RUN sh /tmp/install-soul-guardian.sh && rm /tmp/install-soul-guardian.sh
+RUN --mount=type=bind,from=openclaw_assets,target=/staged \
+    case "$OPENCLAW_ASSET_MODE" in \
+        online) sh /tmp/install-soul-guardian.sh ;; \
+        staged) sh /tmp/install-soul-guardian.sh --archive-file /staged/common/soul-guardian.tar.gz ;; \
+        *) exit 2 ;; \
+    esac && rm /tmp/install-soul-guardian.sh
 COPY docker/openclaw/linkup-skills/ /tmp/linkup-skills/
 COPY docker/openclaw/install-linkup.sh /tmp/install-linkup.sh
 RUN sh /tmp/install-linkup.sh && rm /tmp/install-linkup.sh
+COPY docker/openclaw/installed-assets.py /usr/local/bin/installed-assets.py
+RUN python3 /usr/local/bin/installed-assets.py create \
+    --skills-root "$(npm root -g)/openclaw/skills" \
+    --gog-roots-file /usr/local/share/openclaw-integrity/gog-skill-roots.txt \
+    --output-dir /usr/local/share/openclaw-integrity
 COPY docker/openclaw/validate-gogcli.sh /usr/local/bin/validate-gogcli.sh
 RUN chmod 0755 /usr/local/bin/validate-gogcli.sh
 COPY docker/openclaw/validate-officecli.sh /usr/local/bin/validate-officecli.sh

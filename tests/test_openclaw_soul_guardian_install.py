@@ -106,4 +106,27 @@ def test_docker_context_includes_soul_guardian_installer() -> None:
     dockerfile = (ROOT / "Dockerfile.openclaw").read_text()
     assert "!docker/openclaw/install-soul-guardian.sh" in ignore
     assert "COPY docker/openclaw/install-soul-guardian.sh /tmp/install-soul-guardian.sh" in dockerfile
-    assert "RUN sh /tmp/install-soul-guardian.sh && rm /tmp/install-soul-guardian.sh" in dockerfile
+    assert "sh /tmp/install-soul-guardian.sh" in dockerfile
+    assert "rm /tmp/install-soul-guardian.sh" in dockerfile
+
+
+def test_local_archive_installs_without_network(install_fixture: tuple[Path, dict[str, str]]) -> None:
+    script, env = install_fixture
+    result = subprocess.run(["sh", str(script), "--archive-file", env["ARCHIVE"]],
+                            env=env, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    assert (Path(env["NPM_ROOT"]) / "openclaw/skills/soul-guardian/SKILL.md").read_text() == "soul-guardian upstream\n"
+    assert not Path(env["CURL_LOG"]).exists()
+
+
+@pytest.mark.parametrize("failure", ["missing", "digest"])
+def test_bad_local_archive_fails_without_network(install_fixture: tuple[Path, dict[str, str]], failure: str) -> None:
+    script, env = install_fixture
+    archive = Path(env["ARCHIVE"]) if failure == "digest" else script.parent / "missing"
+    if failure == "digest":
+        archive.write_bytes(b"bad")
+    result = subprocess.run(["sh", str(script), "--archive-file", str(archive)],
+                            env=env, capture_output=True, text=True, check=False)
+    assert result.returncode != 0
+    assert (Path(env["NPM_ROOT"]) / "openclaw/skills/soul-guardian/stale").exists()
+    assert not Path(env["CURL_LOG"]).exists()

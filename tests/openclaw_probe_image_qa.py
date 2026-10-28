@@ -54,7 +54,7 @@ def prepare(directory: Path) -> tuple[dict[str, Path], dict[str, str]]:
         executable = binary_dir / name
         executable.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{__file__}" --fake "$0" "$@"\n')
         executable.chmod(0o755)
-    for helper in ("startup-probe.sh", "startup-probe.py"):
+    for helper in ("startup-probe.sh", "startup-probe.py", "installed-assets.py"):
         shutil.copy2(SOURCE / helper, directory / helper)
     scripts = {}
     for name in VALIDATORS:

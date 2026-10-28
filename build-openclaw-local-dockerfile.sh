@@ -29,6 +29,27 @@ case "$DOCKER_PLATFORM" in
         ;;
 esac
 
+ASSET_ARGS=()
+case "${OPENCLAW_ASSET_MODE:-online}" in
+    online) ;;
+    staged)
+        if [ -z "${OPENCLAW_ASSET_DIR:-}" ] || [ ! -d "$OPENCLAW_ASSET_DIR" ]; then
+            echo '[openclaw-build] OPENCLAW_ASSET_DIR must name an existing directory in staged mode' >&2
+            exit 2
+        fi
+        ASSET_DIR="$(cd "$OPENCLAW_ASSET_DIR" && pwd -P)"
+        for asset in "linux-${DOCKER_PLATFORM#linux/}/gogcli.tar.gz" "linux-${DOCKER_PLATFORM#linux/}/officecli" \
+            common/officecli-SKILL.md common/gogcli-skills.tar.gz common/soul-guardian.tar.gz; do
+            if [ ! -f "$ASSET_DIR/$asset" ]; then
+                echo "[openclaw-build] missing staged asset: $ASSET_DIR/$asset" >&2
+                exit 2
+            fi
+        done
+        ASSET_ARGS=(--build-arg OPENCLAW_ASSET_MODE=staged --build-context "openclaw_assets=$ASSET_DIR")
+        ;;
+    *) echo "[openclaw-build] invalid OPENCLAW_ASSET_MODE: $OPENCLAW_ASSET_MODE" >&2; exit 2 ;;
+esac
+
 echo "[openclaw-build] Building $LOCAL_IMAGE for $DOCKER_PLATFORM with OpenClaw $OPENCLAW_VERSION"
 docker buildx build \
     --platform "$DOCKER_PLATFORM" \
@@ -38,6 +59,7 @@ docker buildx build \
     --build-arg GOGCLI_VERSION="$GOGCLI_VERSION" \
     --build-arg GOGCLI_AMD64_SHA256="$GOGCLI_AMD64_SHA256" \
     --build-arg GOGCLI_ARM64_SHA256="$GOGCLI_ARM64_SHA256" \
+    ${ASSET_ARGS[@]+"${ASSET_ARGS[@]}"} \
     -t "$LOCAL_IMAGE" \
     --load \
     .

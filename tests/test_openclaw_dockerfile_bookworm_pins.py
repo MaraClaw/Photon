@@ -104,7 +104,7 @@ def test_dockerfile_target_selection_uses_buildkit_arguments_not_host_architectu
     stage = source.split("FROM base_${TARGETARCH}", 1)[1]
     assert "ARG TARGETOS\n" in stage
     assert "ARG TARGETARCH\n" in stage
-    selection = source.split("RUN case ", 1)[1].split("esac", 1)[0]
+    selection = source.split("case ", 1)[1].split("esac", 1)[0]
     operating_system, architecture = target.split("/")
     arguments = _argument_values(source)
 

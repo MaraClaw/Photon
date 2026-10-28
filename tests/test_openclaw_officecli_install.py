@@ -123,3 +123,32 @@ def test_committed_pins_are_not_overridable() -> None:
         assert f'OFFICECLI_{arch.upper()}_SHA256="{pin}"' in source
     assert f'OFFICECLI_SKILL_SHA256="{SKILL_PIN}"' in source
     assert "readonly OFFICECLI_TAG OFFICECLI_ARM64_SHA256 OFFICECLI_AMD64_SHA256 OFFICECLI_SKILL_SHA256" in source
+
+
+@pytest.mark.parametrize("architecture", ["amd64", "arm64"])
+def test_local_inputs_install_without_network(install_fixture: tuple[Path, dict[str, str]], architecture: str) -> None:
+    script, env = install_fixture
+    binary = script.parent / ("binary-arm64" if architecture == "arm64" else "binary")
+    result = subprocess.run(
+        ["sh", str(script), "--binary-file", str(binary), "--skill-file", str(script.parent / "skill")],
+        env=env | {"TARGETARCH": architecture}, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (script.parent / "system bin/officecli").read_bytes() == binary.read_bytes()
+    assert not Path(env["CURL_LOG"]).exists()
+
+
+@pytest.mark.parametrize("failure", ["missing", "partial", "binary", "skill", "wrong-arch"])
+def test_bad_local_inputs_fail_without_network(install_fixture: tuple[Path, dict[str, str]], failure: str) -> None:
+    script, env = install_fixture
+    binary = script.parent / ("missing" if failure == "missing" else "binary-arm64" if failure == "wrong-arch" else "binary")
+    skill = script.parent / "skill"
+    if failure in ("binary", "skill"):
+        (binary if failure == "binary" else skill).write_bytes(b"bad")
+    args = ["--binary-file", str(binary)]
+    if failure != "partial":
+        args.extend(["--skill-file", str(skill)])
+    result = subprocess.run(["sh", str(script), *args], env=env, capture_output=True, text=True, check=False)
+    assert result.returncode != 0
+    assert not Path(env["CURL_LOG"]).exists()
+    assert not Path(env["EXEC_LOG"]).exists()

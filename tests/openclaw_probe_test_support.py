@@ -15,6 +15,44 @@ import pytest
 
 POLICY_KEYS = ("OPENCLAW_PROBE_TIMEOUT_SECONDS", "OPENCLAW_PROBE_GRACE_SECONDS")
 INVALID_POLICY = ("", "0", "-1", "NaN", "inf", " 1", "1 ", "1e2")
+INTEGRITY_HELPERS = ("startup-probe.sh", "startup-probe.py", "installed-assets.py")
+
+
+def prepare_integrity(root: Path, skills: Path, env: dict[str, str], script: Path) -> Path:
+    root = root.resolve()
+    skills = skills.resolve()
+    env["NPM_ROOT"] = str(skills.parent.parent)
+    binaries = root / "integrity-binaries"
+    binaries.mkdir(exist_ok=True)
+    for name in ("gog", "officecli"):
+        binary = binaries / name
+        if not binary.exists():
+            binary.write_text("fixture\n")
+    for name in ("gog", "crabbox", "officecli", "soul-guardian", "linkup-search", "linkup-fetch"):
+        directory = skills / name
+        directory.mkdir(parents=True, exist_ok=True)
+        if not any(directory.iterdir()):
+            (directory / "fixture").write_text("fixture\n")
+    roots = root / "gog-roots.txt"
+    roots.write_text("gog\ncrabbox\n")
+    inventory = root / "integrity"
+    validator = root / script.name
+    text = script.read_text().replace("/usr/local/share/openclaw-integrity", str(inventory))
+    validator.write_text(text)
+    for helper in INTEGRITY_HELPERS:
+        source = script.parent / helper
+        destination = root / helper
+        if source != destination:
+            shutil.copy2(source, destination)
+    helper = root / "installed-assets.py"
+    helper.write_text(helper.read_text().replace("/usr/local/bin/gog", env.get("INTEGRITY_BINARY_GOG", str(binaries / "gog"))).replace("/usr/local/bin/officecli", env.get("INTEGRITY_BINARY_OFFICECLI", str(binaries / "officecli"))))
+    env.update({"INTEGRITY_HELPER": str(helper), "INTEGRITY_SKILLS": str(skills), "INTEGRITY_ROOTS": str(roots), "INTEGRITY_DIR": str(inventory), "VALIDATOR": str(validator)})
+    rebaseline(env)
+    return validator
+
+
+def rebaseline(env: dict[str, str]) -> None:
+    subprocess.run([sys.executable, env["INTEGRITY_HELPER"], "create", "--skills-root", env["INTEGRITY_SKILLS"], "--gog-roots-file", env["INTEGRITY_ROOTS"], "--output-dir", env["INTEGRITY_DIR"]], check=True, capture_output=True, text=True)
 
 
 def exercise_script_lookup(
@@ -28,12 +66,12 @@ def exercise_script_lookup(
     cwd.mkdir()
     shutil.copy2(script, path_dir / script.name)
     (path_dir / script.name).chmod(0o755)
-    for helper in ("startup-probe.sh", "startup-probe.py"):
+    for helper in INTEGRITY_HELPERS:
         shutil.copy2(script.parent / helper, path_dir / helper)
     if local:
         shutil.copy2(script, cwd / script.name)
         (cwd / script.name).chmod(0o644)
-        for helper in ("startup-probe.sh", "startup-probe.py"):
+        for helper in INTEGRITY_HELPERS:
             shutil.copy2(script.parent / helper, cwd / helper)
         (path_dir / "startup-probe.sh").write_text("exit 61\n")
     npm = Path(env["PATH"].split(os.pathsep)[0]) / "npm"
@@ -101,6 +139,8 @@ def install_hang(root: Path, env: dict[str, str], target: Path, *, python_probe:
     else:
         target.write_text(f"#!/bin/sh\n{command}\n")
     target.chmod(0o755)
+    if target.name in {"gog", "officecli"} and "INTEGRITY_DIR" in env:
+        rebaseline(env)
 
 
 @contextlib.contextmanager

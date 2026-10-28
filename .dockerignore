@@ -12,5 +12,6 @@
 !docker/openclaw/validate-linkup.sh
 !docker/openclaw/startup-probe.sh
 !docker/openclaw/startup-probe.py
+!docker/openclaw/installed-assets.py
 !docker/openclaw/linkup-skills/
 !docker/openclaw/linkup-skills/**

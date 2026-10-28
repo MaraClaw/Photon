@@ -19,7 +19,8 @@ def test_image_installs_pinned_cli_and_runs_validator_as_entrypoint() -> None:
     ]
     assert json.loads(command.removeprefix("CMD ")) == ["openclaw", "gateway"]
     assert "COPY docker/openclaw/install-officecli.sh /tmp/install-officecli.sh" in lines
-    assert "RUN sh /tmp/install-officecli.sh && rm /tmp/install-officecli.sh" in lines
+    assert "online) sh /tmp/install-officecli.sh ;;" in source
+    assert 'staged) sh /tmp/install-officecli.sh --binary-file "/staged/linux-${TARGETARCH}/officecli" --skill-file /staged/common/officecli-SKILL.md ;;' in source
     assert "COPY docker/openclaw/validate-gogcli.sh /usr/local/bin/validate-gogcli.sh" in lines
     assert "RUN chmod 0755 /usr/local/bin/validate-gogcli.sh" in lines
     for name in ("officecli", "soul-guardian", "linkup"):
@@ -42,7 +43,7 @@ def test_image_installs_pinned_cli_and_runs_validator_as_entrypoint() -> None:
     assert 'rm -rf /tmp/linkup-skills' in installer
     path = next(line for line in lines if line.startswith("ENV PATH="))
     assert "/usr/local/bin" in path.split()[1].removeprefix("PATH=").split(":")
-    assert source.index("RUN sh /tmp/install-officecli.sh") < source.index("USER node")
+    assert source.index("sh /tmp/install-officecli.sh") < source.index("USER node")
     assert "bootstrap-officecli" not in source
 
 
@@ -64,8 +65,32 @@ def test_officecli_flags_are_effective_for_install_and_gateway() -> None:
             for token in shlex.split(body):
                 name, _, value = token.partition("=")
                 environment[name] = value
-        if instruction == "RUN" and body.startswith("sh /tmp/install-officecli.sh"):
+        if instruction == "RUN" and "sh /tmp/install-officecli.sh" in body:
             install_environment = environment.copy()
     for name in ("OFFICECLI_SKIP_UPDATE", "OFFICECLI_NO_AUTO_RESIDENT"):
         assert install_environment.get(name) == "1"
         assert environment.get(name) == "1"
+
+
+def test_image_inventory_is_created_after_installers_before_node() -> None:
+    source = DOCKERFILE.read_text()
+    allowed = (DOCKERFILE.parent / ".dockerignore").read_text().splitlines()
+    assert "!docker/openclaw/installed-assets.py" in allowed
+    assert "COPY docker/openclaw/installed-assets.py /usr/local/bin/installed-assets.py" in source
+    inventory = source.index("RUN python3 /usr/local/bin/installed-assets.py create")
+    assert source.index("RUN sh /tmp/install-linkup.sh") < inventory < source.index("USER node")
+    assert '--skills-root "$(npm root -g)/openclaw/skills"' in source[inventory:]
+    assert "--gog-roots-file /usr/local/share/openclaw-integrity/gog-skill-roots.txt" in source[inventory:]
+    assert "--output-dir /usr/local/share/openclaw-integrity" in source[inventory:]
+
+
+def test_staged_assets_are_bind_mounted_and_use_pinned_gog_digest() -> None:
+    source = DOCKERFILE.read_text()
+    assert "FROM scratch AS openclaw_assets" in source
+    assert "ARG OPENCLAW_ASSET_MODE=online" in source
+    assert source.count("--mount=type=bind,from=openclaw_assets,target=/staged") == 4
+    assert 'GOGCLI_ARCHIVE="/staged/linux-${TARGETARCH}/gogcli.tar.gz"' in source
+    assert source.index('"${GOGCLI_SHA256#sha256:}" "$GOGCLI_ARCHIVE"') < source.index('tar -xzf "$GOGCLI_ARCHIVE"')
+    assert "--archive-file /staged/common/gogcli-skills.tar.gz" in source
+    assert "--archive-file /staged/common/soul-guardian.tar.gz" in source
+    assert source.count("--ownership-output /usr/local/share/openclaw-integrity/gog-skill-roots.txt") == 2

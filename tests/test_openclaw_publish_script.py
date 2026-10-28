@@ -124,3 +124,28 @@ def test_docker_failure_propagates_without_false_success(tmp_path: Path, script:
     assert len(log_path.read_text().splitlines()) == 1
     assert "Successfully" not in result.stdout
     assert "Published" not in result.stdout
+
+
+@pytest.mark.parametrize("missing", [None, "linux-amd64/officecli", "linux-arm64/gogcli.tar.gz", "common/soul-guardian.tar.gz"])
+def test_staged_publish_requires_both_targets_before_docker(tmp_path: Path, missing: str | None) -> None:
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    assets = tmp_path / "assets with spaces"
+    for name in ("linux-amd64/gogcli.tar.gz", "linux-amd64/officecli", "linux-arm64/gogcli.tar.gz",
+                 "linux-arm64/officecli", "common/officecli-SKILL.md", "common/gogcli-skills.tar.gz", "common/soul-guardian.tar.gz"):
+        if name != missing:
+            path = assets / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+    env = build_env(bin_dir, log_path, tmp_path / "missing.env") | {
+        "DOCKERHUB_NAMESPACE": "acme", "OPENCLAW_ASSET_MODE": "staged", "OPENCLAW_ASSET_DIR": str(assets),
+    }
+    result = run_publish_script(env)
+    if missing is not None:
+        assert result.returncode != 0
+        assert not log_path.exists()
+    else:
+        assert result.returncode == 0, result.stderr
+        args = Path(f"{log_path}.argv").read_bytes().decode().split("\0")[:-1]
+        assert args[args.index("--build-context") + 1] == f"openclaw_assets={assets.resolve()}"
+        assert "OPENCLAW_ASSET_MODE=staged" in args
+        assert "--push" in args and "--load" not in args

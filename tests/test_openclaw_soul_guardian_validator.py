@@ -10,7 +10,7 @@ import pytest
 
 from openclaw_probe_test_support import (
     INVALID_POLICY, POLICY_KEYS, clean_policy, exercise_final_child,
-    exercise_invalid_policy, exercise_script_lookup, exercise_signal, exercise_timeout, install_hang,
+    exercise_invalid_policy, exercise_script_lookup, exercise_signal, exercise_timeout, install_hang, prepare_integrity, rebaseline,
 )
 
 VALIDATOR: Final = Path(__file__).resolve().parents[1] / "docker/openclaw/validate-soul-guardian.sh"
@@ -24,7 +24,7 @@ ASSETS: Final = (
 @pytest.mark.parametrize("invalid", [False, True])
 def test_guardian_slashless_script_lookup(guardian: tuple[Path, dict[str, str]], tmp_path: Path, local: bool, invalid: bool) -> None:
     _, env = guardian
-    exercise_script_lookup((VALIDATOR, env), tmp_path, (local, invalid))
+    exercise_script_lookup((Path(env["VALIDATOR"]), env), tmp_path, (local, invalid))
 
 
 @pytest.fixture
@@ -61,6 +61,7 @@ def guardian(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     }
     env.pop("PYTHONDONTWRITEBYTECODE", None)
     clean_policy(env)
+    prepare_integrity(tmp_path, skill.parent, env, VALIDATOR)
     return skill, env
 
 
@@ -78,7 +79,7 @@ def test_exec_preserves_arguments_environment_and_status_when_skill_is_valid(
     )
     arguments = ["space value", "", "$(literal);*", "--flag=value"]
     result = subprocess.run(
-        ["/bin/sh", str(VALIDATOR), sys.executable, str(child), *arguments],
+        ["/bin/sh", env["VALIDATOR"], sys.executable, str(child), *arguments],
         env=env | {"PASSTHROUGH": "environment value", "EXIT_CODE": str(exit_code)},
         capture_output=True, text=True, check=False,
     )
@@ -106,7 +107,7 @@ def test_invalid_asset_blocks_child(guardian: tuple[Path, dict[str, str]], asset
         if failure == "broken-link":
             path.symlink_to("missing-target")
     result = subprocess.run(
-        ["/bin/sh", str(VALIDATOR), "/bin/sh", "-c", 'touch "$CHILD_LOG"'],
+        ["/bin/sh", env["VALIDATOR"], "/bin/sh", "-c", 'touch "$CHILD_LOG"'],
         env=env, capture_output=True, text=True, check=False,
     )
     assert result.returncode != 0
@@ -129,8 +130,10 @@ def test_probe_or_discovery_failure_blocks_child(guardian: tuple[Path, dict[str,
         (skill / "skill.json").write_text("{broken\n")
     if failure == "broken-onboarding":
         (skill / "scripts/onboard_state_dir.py").write_text("def broken(:\n")
+    if failure in {"broken-python", "malformed-json", "broken-onboarding"}:
+        rebaseline(env)
     result = subprocess.run(
-        ["/bin/sh", str(VALIDATOR), "/bin/sh", "-c", 'touch "$CHILD_LOG"'],
+        ["/bin/sh", env["VALIDATOR"], "/bin/sh", "-c", 'touch "$CHILD_LOG"'],
         env=env, capture_output=True, text=True, check=False,
     )
     assert result.returncode != 0
@@ -147,7 +150,7 @@ def test_guardian_hanging_probe_times_out(guardian: tuple[Path, dict[str, str]],
     skill, env = guardian
     root = Path(env["HOME"]).parent
     install_hang(root, env, root / "bin" / ("npm" if probe == "npm" else "python3"), python_probe="" if probe == "npm" else probe)
-    exercise_timeout(VALIDATOR, env)
+    exercise_timeout(Path(env["VALIDATOR"]), env)
     assert not list(Path(env["HOME"]).iterdir())
     assert not list(skill.rglob("__pycache__"))
 
@@ -158,7 +161,7 @@ def test_invalid_policy_prevents_guardian_probes(guardian: tuple[Path, dict[str,
     _, env = guardian
     root = Path(env["HOME"]).parent
     install_hang(root, env, root / "bin/npm")
-    exercise_invalid_policy(VALIDATOR, env, key, value)
+    exercise_invalid_policy(Path(env["VALIDATOR"]), env, key, value)
 
 
 @pytest.mark.parametrize("signum", [signal.SIGHUP, signal.SIGINT, signal.SIGTERM])
@@ -166,20 +169,38 @@ def test_guardian_signal_cleans_parsing_group(guardian: tuple[Path, dict[str, st
     _, env = guardian
     root = Path(env["HOME"]).parent
     install_hang(root, env, root / "bin/python3", python_probe="compile")
-    exercise_signal(VALIDATOR, env, signum)
+    exercise_signal(Path(env["VALIDATOR"]), env, signum)
 
 
 def test_guardian_restart_rechecks_hanging_probe(guardian: tuple[Path, dict[str, str]]) -> None:
     _, env = guardian
     root = Path(env["HOME"]).parent
-    assert subprocess.run(["/bin/sh", str(VALIDATOR), "/bin/sh", "-c", ":"], env=env, timeout=5, check=False).returncode == 0
+    assert subprocess.run(["/bin/sh", env["VALIDATOR"], "/bin/sh", "-c", ":"], env=env, timeout=5, check=False).returncode == 0
     (Path(env["HOME"]) / ".guardian-checked").touch()
     install_hang(root, env, root / "bin/npm")
-    exercise_timeout(VALIDATOR, env)
+    exercise_timeout(Path(env["VALIDATOR"]), env)
 
 
 def test_guardian_final_child_outlives_probe_deadlines(guardian: tuple[Path, dict[str, str]]) -> None:
     _, env = guardian
     env["PROBE_READY"] = str(Path(env["HOME"]).parent / "child-ready")
     os.mkfifo(env["PROBE_READY"])
-    exercise_final_child(VALIDATOR, env)
+    exercise_final_child(Path(env["VALIDATOR"]), env)
+
+
+def test_guardian_tampering_prevents_discovery_and_execution(guardian: tuple[Path, dict[str, str]]) -> None:
+    skill, env = guardian
+    (skill / "scripts/helper.py").write_text("VALUE = 2\n")
+    marker = skill.parent / "npm-ran"
+    npm = Path(env["PATH"].split(os.pathsep)[0]) / "npm"
+    npm.write_text(f'#!/bin/sh\ntouch "{marker}"\nexit 0\n')
+    result = subprocess.run(["/bin/sh", env["VALIDATOR"], "/bin/sh", "-c", 'touch "$CHILD_LOG"'], env=env, capture_output=True, text=True, check=False)
+    assert result.returncode == 1
+    assert not marker.exists()
+    assert not Path(env["CHILD_LOG"]).exists()
+
+
+def test_untouched_guardian_restart_uses_same_inventory(guardian: tuple[Path, dict[str, str]]) -> None:
+    _, env = guardian
+    for _ in range(2):
+        assert subprocess.run(["/bin/sh", env["VALIDATOR"], "/bin/sh", "-c", ":"], env=env, capture_output=True, text=True, check=False).returncode == 0
