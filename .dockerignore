@@ -5,6 +5,10 @@
 !docker/openclaw/install-officecli.sh
 !docker/openclaw/install-gogcli-skills.sh
 !docker/openclaw/install-soul-guardian.sh
+!docker/openclaw/install-linkup.sh
 !docker/openclaw/validate-gogcli.sh
 !docker/openclaw/validate-officecli.sh
 !docker/openclaw/validate-soul-guardian.sh
+!docker/openclaw/validate-linkup.sh
+!docker/openclaw/linkup-skills/
+!docker/openclaw/linkup-skills/**
