@@ -39,6 +39,21 @@ def main() -> None:
                 ),
                 end="",
             )
+            print(f"Running Linux lifecycle QA for {platform}: {container}", flush=True)
+            print(
+                docker.run(
+                    image,
+                    ["python3", "-B", "/tmp/openclaw-probe-image-qa.py", "space value", "", "$(literal);*"],
+                    name=container,
+                    remove=True,
+                    networks=["none"],
+                    platform=platform,
+                    envs={"OPENCLAW_PROBE_TIMEOUT_SECONDS": "10"},
+                    volumes=[(root / "tests/openclaw_probe_image_qa.py", "/tmp/openclaw-probe-image-qa.py", "ro")],
+                    timeout=600,
+                ),
+                end="",
+            )
         finally:
             original_error = sys.exception()
             cleanup_errors: list[Exception] = []
