@@ -3,11 +3,17 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from openclaw_probe_test_support import (
+    INVALID_POLICY, POLICY_KEYS, clean_policy, exercise_final_child,
+    exercise_invalid_policy, exercise_script_lookup, exercise_signal, exercise_timeout, install_hang,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = ROOT / "docker/openclaw/linkup-skills"
@@ -19,6 +25,13 @@ REFERENCES = {
 }
 REQUIRED_ENV = {"LINKUP_API_BASE", "LINKUP_PROXY_TOKEN"}
 VALID_METADATA = 'metadata: {"openclaw":{"requires":{"env":["LINKUP_API_BASE","LINKUP_PROXY_TOKEN"]}}}'
+
+
+@pytest.mark.parametrize("local", [False, True])
+@pytest.mark.parametrize("invalid", [False, True])
+def test_linkup_slashless_script_lookup(installation: tuple[Path, dict[str, str]], tmp_path: Path, local: bool, invalid: bool) -> None:
+    _, env = installation
+    exercise_script_lookup((VALIDATOR, env), tmp_path, (local, invalid))
 
 
 @pytest.fixture
@@ -36,6 +49,7 @@ def installation(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     env = os.environ | {"PATH": f'{bin_dir}:{os.environ["PATH"]}', "NPM_ROOT": str(npm_root)}
     env.pop("LINKUP_API_BASE", None)
     env.pop("LINKUP_PROXY_TOKEN", None)
+    clean_policy(env)
     return skills, env
 
 
@@ -168,3 +182,44 @@ def test_npm_discovery_failure_blocks_command(installation: tuple[Path, dict[str
     result = subprocess.run(["/bin/sh", str(VALIDATOR), "/bin/false"], env=env, capture_output=True, text=True, check=False)
     assert result.returncode == 1
     assert result.stderr == "Required skill failed verification: linkup\n"
+
+
+@pytest.mark.parametrize("probe", ["npm", "awk", "python3"])
+def test_linkup_hanging_probe_times_out(installation: tuple[Path, dict[str, str]], probe: str) -> None:
+    skills, env = installation
+    root = skills.parents[2]
+    install_hang(root, env, root / "bin" / probe, python_probe="compile" if probe == "python3" else "")
+    exercise_timeout(VALIDATOR, env)
+
+
+@pytest.mark.parametrize("key", POLICY_KEYS)
+@pytest.mark.parametrize("value", INVALID_POLICY)
+def test_invalid_policy_prevents_linkup_probes(installation: tuple[Path, dict[str, str]], key: str, value: str) -> None:
+    skills, env = installation
+    root = skills.parents[2]
+    install_hang(root, env, root / "bin/npm")
+    exercise_invalid_policy(VALIDATOR, env, key, value)
+
+
+@pytest.mark.parametrize("signum", [signal.SIGHUP, signal.SIGINT, signal.SIGTERM])
+def test_linkup_signal_cleans_parsing_group(installation: tuple[Path, dict[str, str]], signum: int) -> None:
+    skills, env = installation
+    root = skills.parents[2]
+    install_hang(root, env, root / "bin/awk")
+    exercise_signal(VALIDATOR, env, signum)
+
+
+def test_linkup_restart_rechecks_hanging_probe(installation: tuple[Path, dict[str, str]]) -> None:
+    skills, env = installation
+    root = skills.parents[2]
+    assert subprocess.run(["/bin/sh", str(VALIDATOR), "/bin/sh", "-c", ":"], env=env, timeout=5, check=False).returncode == 0
+    (root / ".linkup-checked").touch()
+    install_hang(root, env, root / "bin/npm")
+    exercise_timeout(VALIDATOR, env)
+
+
+def test_linkup_final_child_outlives_probe_deadlines(installation: tuple[Path, dict[str, str]]) -> None:
+    skills, env = installation
+    env["PROBE_READY"] = str(skills.parents[2] / "child-ready")
+    os.mkfifo(env["PROBE_READY"])
+    exercise_final_child(VALIDATOR, env)
