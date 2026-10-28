@@ -40,9 +40,9 @@ def build_env(bin_dir: Path, log_path: Path, missing_env_file: Path) -> dict[str
     return env
 
 
-def run_build_script(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def run_build_script(env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603 - fixed repository script path under test
-        [str(BUILD_SCRIPT)],
+        [str(BUILD_SCRIPT), *args],
         cwd=REPO_ROOT,
         env=env,
         capture_output=True,
@@ -61,17 +61,23 @@ def test_openclaw_build_script_uses_arm64_platform_by_default(tmp_path: Path) ->
 
     # Then
     assert result.returncode == 0, result.stderr
-    assert "--platform linux/arm64" in log_path.read_text(encoding="utf-8")
+    command = log_path.read_text(encoding="utf-8")
+    assert "--platform linux/arm64" in command
+    assert "-t arm64-openclaw:local --load" in command
 
 
+@pytest.mark.parametrize("architecture", ["amd64", "arm64"])
 @pytest.mark.parametrize("local_image", [None, "", "workspace/openclaw:custom"])
-def test_openclaw_build_script_selects_local_image_when_configured(tmp_path: Path, local_image: str | None) -> None:
+def test_openclaw_build_script_selects_local_image_when_configured(
+    tmp_path: Path, local_image: str | None, architecture: str
+) -> None:
     # Given
     bin_dir, log_path = install_fake_docker(tmp_path)
     env = build_env(bin_dir, log_path, tmp_path / "missing.env")
+    env["DOCKER_PLATFORM"] = f"linux/{architecture}"
     if local_image is not None:
         env["MARACLAW_OPENCLAW_IMAGE"] = local_image
-    expected_image = local_image or "openclaw:local"
+    expected_image = f"{architecture}-{local_image or 'openclaw:local'}"
 
     # When
     result = run_build_script(env)
@@ -84,17 +90,21 @@ def test_openclaw_build_script_selects_local_image_when_configured(tmp_path: Pat
 
 @pytest.mark.parametrize("inherited_image", [None, "process/openclaw:inherited"])
 @pytest.mark.parametrize("file_image", ["workspace/openclaw:from-file", ""])
+@pytest.mark.parametrize("architecture", ["amd64", "arm64"])
 def test_openclaw_build_script_prefers_image_when_env_file_assigns_it(
-    tmp_path: Path, inherited_image: str | None, file_image: str
+    tmp_path: Path, inherited_image: str | None, file_image: str, architecture: str
 ) -> None:
     # Given
     bin_dir, log_path = install_fake_docker(tmp_path)
     env_file = tmp_path / "build.env"
-    env_file.write_text(f'MARACLAW_OPENCLAW_IMAGE="{file_image}"\n', encoding="utf-8")
+    env_file.write_text(
+        f'MARACLAW_OPENCLAW_IMAGE="{file_image}"\nDOCKER_PLATFORM="linux/{architecture}"\n', encoding="utf-8"
+    )
     env = build_env(bin_dir, log_path, env_file)
+    env["DOCKER_PLATFORM"] = "linux/arm64" if architecture == "amd64" else "linux/amd64"
     if inherited_image is not None:
         env["MARACLAW_OPENCLAW_IMAGE"] = inherited_image
-    expected_image = file_image or "openclaw:local"
+    expected_image = f"{architecture}-{file_image or 'openclaw:local'}"
 
     # When
     result = run_build_script(env)
@@ -103,6 +113,36 @@ def test_openclaw_build_script_prefers_image_when_env_file_assigns_it(
     assert result.returncode == 0, result.stderr
     assert f"-t {expected_image} --load" in log_path.read_text(encoding="utf-8")
     assert result.stdout.count(expected_image) == 2
+
+
+@pytest.mark.parametrize("argument", ["--help", "-h"])
+def test_openclaw_build_script_help_bypasses_env_and_docker(tmp_path: Path, argument: str) -> None:
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    env_file = tmp_path / "build.env"
+    env_file.write_text("exit 99\n", encoding="utf-8")
+    env = build_env(bin_dir, log_path, env_file)
+
+    result = run_build_script(env, argument)
+
+    assert result.returncode == 0
+    assert "Usage:" in result.stdout
+    assert not log_path.exists()
+
+
+@pytest.mark.parametrize("arguments", [("--unknown",), ("--help", "--unknown")])
+def test_openclaw_build_script_rejects_unknown_arguments_before_env_and_docker(
+    tmp_path: Path, arguments: tuple[str, ...]
+) -> None:
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    env_file = tmp_path / "build.env"
+    env_file.write_text("exit 99\n", encoding="utf-8")
+    env = build_env(bin_dir, log_path, env_file)
+
+    result = run_build_script(env, *arguments)
+
+    assert result.returncode == 2
+    assert "Usage:" in result.stderr
+    assert not log_path.exists()
 
 
 def test_openclaw_build_script_passes_default_openclaw_version_and_sha(tmp_path: Path) -> None:

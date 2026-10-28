@@ -1,6 +1,42 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+usage() {
+    cat <<'EOF'
+Usage: ./build-openclaw-local-dockerfile.sh [-h|--help]
+
+Build and load one local OpenClaw image. Environment settings:
+  DOCKER_PLATFORM              linux/arm64 (default) or linux/amd64
+  MARACLAW_OPENCLAW_IMAGE      image name and tag (default: openclaw:local)
+  ENV_FILE                     env file to source (default: .env)
+  OPENCLAW_ASSET_MODE          online (default) or staged
+  OPENCLAW_ASSET_DIR           asset directory required in staged mode
+  OPENCLAW_VERSION             default: 2026.10.8
+  OPENCLAW_SHA256              default: sha256:7e36685a0b5fd9c8c3afcfa93ee33fad871f7c6c8b6e695cae6720d14a765f18
+  GOGCLI_VERSION               default: 0.47.1
+  GOGCLI_AMD64_SHA256          default: sha256:279bc3a03c1919d774e268ef229949f45b753a0e21257f9fb315b05be7a40ea9
+  GOGCLI_ARM64_SHA256          default: sha256:c677ac6abf5e187e987a87fe1b588f454b002a7d7019de81b9e8db02e9e902b6
+
+The selected env file is sourced from the script directory if it exists;
+its assignments override inherited environment values. Empty values use defaults.
+The target architecture is prepended literally to the image name:
+  ./build-openclaw-local-dockerfile.sh  -> arm64-openclaw:local
+  DOCKER_PLATFORM=linux/amd64 MARACLAW_OPENCLAW_IMAGE=workspace/openclaw:custom \
+    ./build-openclaw-local-dockerfile.sh  -> amd64-workspace/openclaw:custom
+Examples assume the selected env file does not override those settings.
+EOF
+}
+
+if [ "$#" -gt 0 ]; then
+    if [ "$#" -eq 1 ] && { [ "$1" = --help ] || [ "$1" = -h ]; }; then
+        usage
+        exit 0
+    fi
+    echo '[openclaw-build] Unknown arguments' >&2
+    usage >&2
+    exit 2
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
@@ -13,7 +49,6 @@ if [ -f "$ENV_FILE" ]; then
     set +a
 fi
 
-LOCAL_IMAGE="${MARACLAW_OPENCLAW_IMAGE:-openclaw:local}"
 OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.10.8}"
 OPENCLAW_SHA256="${OPENCLAW_SHA256:-sha256:7e36685a0b5fd9c8c3afcfa93ee33fad871f7c6c8b6e695cae6720d14a765f18}"
 GOGCLI_VERSION="${GOGCLI_VERSION:-0.47.1}"
@@ -28,6 +63,8 @@ case "$DOCKER_PLATFORM" in
         exit 2
         ;;
 esac
+
+LOCAL_IMAGE="${DOCKER_PLATFORM#linux/}-${MARACLAW_OPENCLAW_IMAGE:-openclaw:local}"
 
 ASSET_ARGS=()
 case "${OPENCLAW_ASSET_MODE:-online}" in
