@@ -1,5 +1,6 @@
 import json
 import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -7,11 +8,23 @@ from typing import Final
 
 import pytest
 
+from openclaw_probe_test_support import (
+    INVALID_POLICY, POLICY_KEYS, clean_policy, exercise_final_child,
+    exercise_invalid_policy, exercise_script_lookup, exercise_signal, exercise_timeout, install_hang,
+)
+
 VALIDATOR: Final = Path(__file__).resolve().parents[1] / "docker/openclaw/validate-soul-guardian.sh"
 ASSETS: Final = (
     "SKILL.md", "CHANGELOG.md", "skill.json", "LICENSE",
     "scripts/soul_guardian.py", "scripts/onboard_state_dir.py",
 )
+
+
+@pytest.mark.parametrize("local", [False, True])
+@pytest.mark.parametrize("invalid", [False, True])
+def test_guardian_slashless_script_lookup(guardian: tuple[Path, dict[str, str]], tmp_path: Path, local: bool, invalid: bool) -> None:
+    _, env = guardian
+    exercise_script_lookup((VALIDATOR, env), tmp_path, (local, invalid))
 
 
 @pytest.fixture
@@ -47,6 +60,7 @@ def guardian(tmp_path: Path) -> tuple[Path, dict[str, str]]:
         "CHILD_LOG": str(tmp_path / "child.json"),
     }
     env.pop("PYTHONDONTWRITEBYTECODE", None)
+    clean_policy(env)
     return skill, env
 
 
@@ -126,3 +140,46 @@ def test_probe_or_discovery_failure_blocks_child(guardian: tuple[Path, dict[str,
     assert not list(Path(env["HOME"]).iterdir())
     assert not list(skill.rglob("__pycache__"))
     assert not list(skill.rglob("*.pyc"))
+
+
+@pytest.mark.parametrize("probe", ["npm", "compile", "help"])
+def test_guardian_hanging_probe_times_out(guardian: tuple[Path, dict[str, str]], probe: str) -> None:
+    skill, env = guardian
+    root = Path(env["HOME"]).parent
+    install_hang(root, env, root / "bin" / ("npm" if probe == "npm" else "python3"), python_probe="" if probe == "npm" else probe)
+    exercise_timeout(VALIDATOR, env)
+    assert not list(Path(env["HOME"]).iterdir())
+    assert not list(skill.rglob("__pycache__"))
+
+
+@pytest.mark.parametrize("key", POLICY_KEYS)
+@pytest.mark.parametrize("value", INVALID_POLICY)
+def test_invalid_policy_prevents_guardian_probes(guardian: tuple[Path, dict[str, str]], key: str, value: str) -> None:
+    _, env = guardian
+    root = Path(env["HOME"]).parent
+    install_hang(root, env, root / "bin/npm")
+    exercise_invalid_policy(VALIDATOR, env, key, value)
+
+
+@pytest.mark.parametrize("signum", [signal.SIGHUP, signal.SIGINT, signal.SIGTERM])
+def test_guardian_signal_cleans_parsing_group(guardian: tuple[Path, dict[str, str]], signum: int) -> None:
+    _, env = guardian
+    root = Path(env["HOME"]).parent
+    install_hang(root, env, root / "bin/python3", python_probe="compile")
+    exercise_signal(VALIDATOR, env, signum)
+
+
+def test_guardian_restart_rechecks_hanging_probe(guardian: tuple[Path, dict[str, str]]) -> None:
+    _, env = guardian
+    root = Path(env["HOME"]).parent
+    assert subprocess.run(["/bin/sh", str(VALIDATOR), "/bin/sh", "-c", ":"], env=env, timeout=5, check=False).returncode == 0
+    (Path(env["HOME"]) / ".guardian-checked").touch()
+    install_hang(root, env, root / "bin/npm")
+    exercise_timeout(VALIDATOR, env)
+
+
+def test_guardian_final_child_outlives_probe_deadlines(guardian: tuple[Path, dict[str, str]]) -> None:
+    _, env = guardian
+    env["PROBE_READY"] = str(Path(env["HOME"]).parent / "child-ready")
+    os.mkfifo(env["PROBE_READY"])
+    exercise_final_child(VALIDATOR, env)
