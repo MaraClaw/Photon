@@ -27,9 +27,50 @@ case "${TARGETOS:-}/${TARGETARCH:-}" in
     *) printf 'unsupported OfficeCLI target: %s/%s\n' "${TARGETOS:-}" "${TARGETARCH:-}" >&2; exit 2 ;;
 esac
 
-stage="$(mktemp -d)"
-trap 'rm -rf -- "$stage"' EXIT
-trap 'exit 1' HUP INT TERM
+stage="$(mktemp -d "${TMPDIR:-/tmp}/officecli.XXXXXXXXXX")"
+binary_destination=/usr/local/bin/officecli
+skill_destination=
+binary_touched=0
+skill_touched=0
+binary_saved=0
+skill_saved=0
+committed=0
+restore_failed=0
+restore_path() {
+    if ! rm -rf -- "$1"; then
+        printf 'OfficeCLI rollback could not remove %s\n' "$1" >&2
+        restore_failed=1
+    elif [ "$2" = 1 ] && ! cp -a -- "$3" "$1"; then
+        printf 'OfficeCLI rollback could not restore %s\n' "$1" >&2
+        restore_failed=1
+    fi
+}
+finish() {
+    status=$?
+    trap - EXIT
+    trap '' HUP INT TERM
+    if [ "$committed" = 0 ]; then
+        if [ "$skill_touched" = 1 ]; then
+            restore_path "$skill_destination" "$skill_saved" "$stage/backup/skill"
+        fi
+        if [ "$binary_touched" = 1 ]; then
+            restore_path "$binary_destination" "$binary_saved" "$stage/backup/officecli"
+        fi
+    fi
+    if [ "$restore_failed" = 1 ]; then
+        printf 'OfficeCLI rollback failed; backups retained at %s\n' "$stage" >&2
+        exit 1
+    fi
+    if ! rm -rf -- "$stage"; then
+        printf 'OfficeCLI temporary data could not be removed: %s\n' "$stage" >&2
+        exit 1
+    fi
+    exit "$status"
+}
+trap finish EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 curl_safe() {
     curl --disable --config /dev/null --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
         --connect-timeout 15 --max-time 120 --retry 2 --retry-delay 1 --retry-max-time 60 --noproxy '*' "$@"
@@ -42,7 +83,27 @@ else
     curl_safe -o "$stage/SKILL.md" "https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/$OFFICECLI_TAG/SKILL.md"
 fi
 printf '%s  %s\n%s  %s\n' "$digest" "$stage/officecli" "$OFFICECLI_SKILL_SHA256" "$stage/SKILL.md" | sha256sum -c -
-install -m 0755 "$stage/officecli" /usr/local/bin/officecli
-install -d -m 0755 "$(npm root -g)/openclaw/skills/officecli"
-install -m 0644 "$stage/SKILL.md" "$(npm root -g)/openclaw/skills/officecli/SKILL.md"
-/usr/local/bin/officecli --version
+install -d -m 0755 "$stage/payload/skill" "$stage/backup"
+install -m 0755 "$stage/officecli" "$stage/payload/officecli"
+install -m 0644 "$stage/SKILL.md" "$stage/payload/skill/SKILL.md"
+skill_destination="$(npm root -g)/openclaw/skills/officecli"
+if [ -e "$binary_destination" ] || [ -L "$binary_destination" ]; then
+    cp -a -- "$binary_destination" "$stage/backup/officecli"
+    binary_saved=1
+fi
+if [ -e "$skill_destination" ] || [ -L "$skill_destination" ]; then
+    cp -a -- "$skill_destination" "$stage/backup/skill"
+    skill_saved=1
+fi
+skill_parent="$(dirname "$skill_destination")"
+if [ ! -d "$skill_parent" ]; then
+    install -d -m 0755 "$skill_parent"
+fi
+binary_touched=1
+rm -rf -- "$binary_destination"
+cp -a -- "$stage/payload/officecli" "$binary_destination"
+skill_touched=1
+rm -rf -- "$skill_destination"
+cp -a -- "$stage/payload/skill" "$skill_destination"
+"$binary_destination" --version
+committed=1
