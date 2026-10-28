@@ -14,6 +14,12 @@ OPENCLAW_SHA256 = "sha256:7e36685a0b5fd9c8c3afcfa93ee33fad871f7c6c8b6e695cae6720
 GOGCLI_VERSION = "0.47.1"
 GOGCLI_ARM64_SHA256 = "sha256:c677ac6abf5e187e987a87fe1b588f454b002a7d7019de81b9e8db02e9e902b6"
 GOGCLI_AMD64_SHA256 = "sha256:279bc3a03c1919d774e268ef229949f45b753a0e21257f9fb315b05be7a40ea9"
+OFFICECLI_PINS = {
+    "OFFICECLI_VERSION": "v1.0.159",
+    "OFFICECLI_ARM64_SHA256": "a27778548f2820771f54a70887af3c3ec214fe60e63b32836b09b3f3e2c4c493",
+    "OFFICECLI_AMD64_SHA256": "92d9aeed324d91ed2a107f7f8dc7468829b14390a66cf2bbdfb25c40beac50ea",
+    "OFFICECLI_SKILL_SHA256": "c950d285ce60021712b4753fb2d9f592308d5622bab776229061dfecb1ce55d4",
+}
 
 
 def install_fake_docker(root: Path) -> tuple[Path, Path]:
@@ -37,6 +43,8 @@ def build_env(bin_dir: Path, log_path: Path, missing_env_file: Path) -> dict[str
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
     env.pop("MARACLAW_OPENCLAW_IMAGE", None)
     env.pop("DOCKER_PLATFORM", None)
+    for name in OFFICECLI_PINS:
+        env.pop(name, None)
     return env
 
 
@@ -188,6 +196,7 @@ def test_environment_example_pins_openclaw_and_gogcli_releases() -> None:
         "OPENCLAW_VERSION": OPENCLAW_VERSION,
         "OPENCLAW_SHA256": OPENCLAW_SHA256,
         "GOGCLI_VERSION": GOGCLI_VERSION,
+        **OFFICECLI_PINS,
     }
     content = ENV_EXAMPLE.read_text(encoding="utf-8")
 

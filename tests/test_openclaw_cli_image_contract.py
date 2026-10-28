@@ -3,8 +3,27 @@ import shlex
 from pathlib import Path
 
 from test_openclaw_officecli_dockerfile import _instructions
+from test_openclaw_build_script import OFFICECLI_PINS
 
 DOCKERFILE = Path(__file__).resolve().parents[1] / "Dockerfile.openclaw"
+
+
+def test_officecli_build_arguments_are_available_to_installer_but_not_runtime() -> None:
+    instructions, errors = _instructions(DOCKERFILE.read_text())
+    assert not errors
+    active_args: dict[str, str] = {}
+    runtime_env: set[str] = set()
+    install_args: dict[str, str] = {}
+    for instruction, body in instructions:
+        if instruction == "ARG":
+            name, _, value = body.partition("=")
+            active_args[name] = value
+        if instruction == "ENV":
+            runtime_env.update(token.partition("=")[0] for token in shlex.split(body))
+        if instruction == "RUN" and "sh /tmp/install-officecli.sh" in body:
+            install_args = active_args.copy()
+    assert {name: install_args[name] for name in OFFICECLI_PINS} == OFFICECLI_PINS
+    assert not runtime_env.intersection(OFFICECLI_PINS)
 
 
 def test_image_installs_pinned_cli_and_runs_validator_as_entrypoint() -> None:
