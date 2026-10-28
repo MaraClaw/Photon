@@ -38,9 +38,12 @@ def test_image_installs_pinned_cli_and_runs_validator_as_entrypoint() -> None:
     assert installer.startswith('#!/bin/sh\nset -eu\n')
     assert 'destination="$(npm root -g)/openclaw/skills"' in installer
     assert 'install -d -m 0755 "$destination"' in installer
-    assert 'cp -R /tmp/linkup-skills/linkup-* "$destination/"' in installer
-    assert 'chmod -R a+rX "$destination"/linkup-*' in installer
-    assert 'rm -rf /tmp/linkup-skills' in installer
+    assert 'source=/tmp/linkup-skills' in installer
+    assert '"$source/manifest.json"' in installer
+    assert 'cp -a -- "$stage/incoming/$name" "$destination/$name"' in installer
+    assert 'chmod -R a+rX "$stage/incoming/$name"' in installer
+    assert '"$destination"/linkup-*' not in installer
+    assert 'rm -rf -- "$source"' in installer
     path = next(line for line in lines if line.startswith("ENV PATH="))
     assert "/usr/local/bin" in path.split()[1].removeprefix("PATH=").split(":")
     assert source.index("sh /tmp/install-officecli.sh") < source.index("USER node")
