@@ -9,11 +9,6 @@ import pytest
 
 ROOT: Final = Path(__file__).resolve().parents[1]
 INSTALLER: Final = ROOT / "docker/openclaw/install-officecli.sh"
-PINS: Final = {
-    "amd64": "92d9aeed324d91ed2a107f7f8dc7468829b14390a66cf2bbdfb25c40beac50ea",
-    "arm64": "a27778548f2820771f54a70887af3c3ec214fe60e63b32836b09b3f3e2c4c493",
-}
-SKILL_PIN: Final = "c950d285ce60021712b4753fb2d9f592308d5622bab776229061dfecb1ce55d4"
 
 
 @pytest.fixture
@@ -31,9 +26,6 @@ def install_fixture(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     (tmp_path / "binary-arm64").write_bytes(arm_binary)
     (tmp_path / "skill").write_bytes(skill)
     source = INSTALLER.read_text()
-    source = source.replace(PINS["amd64"], hashlib.sha256(binary).hexdigest())
-    source = source.replace(PINS["arm64"], hashlib.sha256(arm_binary).hexdigest())
-    source = source.replace(SKILL_PIN, hashlib.sha256(skill).hexdigest())
     source = source.replace("/usr/local/bin/officecli", shlex.quote(str(destination / "officecli")))
     script = tmp_path / "installer.sh"
     script.write_text(source)
@@ -53,6 +45,10 @@ def install_fixture(tmp_path: Path) -> tuple[Path, dict[str, str]]:
         "PATH": f'{bin_dir}:{os.environ["PATH"]}',
         "TARGETOS": "linux",
         "TARGETARCH": "amd64",
+        "OFFICECLI_VERSION": "",
+        "OFFICECLI_AMD64_SHA256": hashlib.sha256(binary).hexdigest(),
+        "OFFICECLI_ARM64_SHA256": hashlib.sha256(arm_binary).hexdigest(),
+        "OFFICECLI_SKILL_SHA256": hashlib.sha256(skill).hexdigest(),
         "FIXTURES": str(tmp_path),
         "NPM_ROOT": str(npm_root),
         "EXEC_LOG": str(tmp_path / "executed"),
@@ -116,13 +112,34 @@ def test_unsupported_target_fails_without_download(install_fixture: tuple[Path, 
     assert not Path(environment["CURL_LOG"]).exists()
 
 
-def test_committed_pins_are_not_overridable() -> None:
-    source = INSTALLER.read_text()
-    assert 'OFFICECLI_TAG="v1.0.159"' in source
-    for arch, pin in PINS.items():
-        assert f'OFFICECLI_{arch.upper()}_SHA256="{pin}"' in source
-    assert f'OFFICECLI_SKILL_SHA256="{SKILL_PIN}"' in source
-    assert "readonly OFFICECLI_TAG OFFICECLI_ARM64_SHA256 OFFICECLI_AMD64_SHA256 OFFICECLI_SKILL_SHA256" in source
+@pytest.mark.parametrize(("architecture", "asset"), [("amd64", "officecli-linux-x64"), ("arm64", "officecli-linux-arm64")])
+@pytest.mark.parametrize("prefix", ["", "sha256:"])
+def test_custom_pins_install_and_select_versioned_urls(
+    install_fixture: tuple[Path, dict[str, str]], architecture: str, asset: str, prefix: str,
+) -> None:
+    _, environment = install_fixture
+    binary_pin = f"OFFICECLI_{architecture.upper()}_SHA256"
+    result = run_installer(
+        install_fixture, TARGETARCH=architecture, OFFICECLI_VERSION="v9.8.7",
+        **{binary_pin: prefix + environment[binary_pin], "OFFICECLI_SKILL_SHA256": prefix + environment["OFFICECLI_SKILL_SHA256"]},
+    )
+    assert result.returncode == 0, result.stderr
+    lines = Path(environment["CURL_LOG"]).read_text().splitlines()
+    assert lines[0].endswith(f"/v9.8.7/{asset}")
+    assert lines[1].endswith("/v9.8.7/SKILL.md")
+
+
+@pytest.mark.parametrize("architecture", ["amd64", "arm64"])
+@pytest.mark.parametrize("artifact", ["binary", "skill"])
+@pytest.mark.parametrize("prefix", ["", "sha256:"])
+def test_wrong_custom_pin_is_rejected_before_execution(
+    install_fixture: tuple[Path, dict[str, str]], architecture: str, artifact: str, prefix: str,
+) -> None:
+    _, environment = install_fixture
+    pin = f"OFFICECLI_{architecture.upper()}_SHA256" if artifact == "binary" else "OFFICECLI_SKILL_SHA256"
+    result = run_installer(install_fixture, TARGETARCH=architecture, **{pin: prefix + "0" * 64})
+    assert result.returncode != 0
+    assert not Path(environment["EXEC_LOG"]).exists()
 
 
 @pytest.mark.parametrize("architecture", ["amd64", "arm64"])
