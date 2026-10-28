@@ -6,6 +6,12 @@ The gogcli skill archive is pinned by commit and SHA256 in `docker/openclaw/inst
 
 The image also bundles `soul-guardian` from `prompt-security/clawsec`, including its AGPL-3.0 license. Its source archive commit and SHA256 are pinned in `docker/openclaw/install-soul-guardian.sh`; verify a new archive independently and update both pins together. The checksum verifies the pinned archive, not a publisher signature. Bundling does not initialize a baseline or enable monitoring: review the installed skill's `SKILL.md` and explicitly opt in to baseline creation and monitoring. Its default restore policy can overwrite changed workspace files, and guardian state may contain sensitive snapshots.
 
+## Startup probe policy
+
+Each external validation probe has a 30-second deadline and a 2-second termination grace. Override these with `OPENCLAW_PROBE_TIMEOUT_SECONDS` and `OPENCLAW_PROBE_GRACE_SECONDS`; both must be positive decimal seconds (fractions are allowed, but empty, zero, negative, non-finite, whitespace and exponent forms are rejected before any probe). Invalid policy exits 2, timeout exits 124, and handled HUP, INT or TERM exits 128 plus the signal number. Probe output is suppressed; captured npm metadata and file-backed passwords are private and trailing newlines are stripped.
+
+The shared Python supervisor terminates the probe process group, escalates to KILL after the grace on timeout or cancellation, and reaps owned descendants on Linux. Residual group members are terminated on ordinary completion too. This covers non-daemonizing probes that stay in their process group, not escaped sessions or uninterruptible kernel waits. The final command is executed unchanged, outside the deadline, after supervision and capture files have been removed. Direct validator use requires POSIX sh, Python 3 with `waitid`/`WNOWAIT`, writable temporary storage, and both `startup-probe` helpers beside the validator; Linux also requires working `prctl` subreaper support. Darwin supports process-group termination for host tests; Linux is the descendant-reaping authority.
+
 ## Local build
 
 Copy `.env.example` to `.env` if you want project-local configuration. Both scripts change to the Photon directory and source `.env` by default; assignments in that file override inherited environment variables. Set `ENV_FILE` to an explicit path to source a different file, or to a nonexistent path to use only the process environment and script defaults.
