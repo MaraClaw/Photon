@@ -79,8 +79,9 @@ def exercise_script_lookup(
     if invalid:
         npm.write_text(f'#!/bin/sh\ntouch "{marker}"\nexit 1\n')
     arguments = ["space value", "", "$(literal);*", "--flag=value"]
+    # Keep $0 slashless without relying on the shell to find its input file on PATH.
     result = subprocess.run(
-        ["/bin/sh", script.name, sys.executable, "-c", "import json,sys; print(json.dumps(sys.argv[1:])); sys.exit(37)", *arguments],
+        ["/bin/sh", "-c", script.read_text(), script.name, sys.executable, "-c", "import json,sys; print(json.dumps(sys.argv[1:])); sys.exit(37)", *arguments],
         cwd=cwd, env=env | {"PATH": f'{path_dir}{os.pathsep}{env["PATH"]}'} | ({POLICY_KEYS[0]: "invalid"} if invalid else {}),
         capture_output=True, text=True, timeout=10, check=False,
     )
