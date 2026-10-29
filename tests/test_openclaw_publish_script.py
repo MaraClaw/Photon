@@ -17,7 +17,7 @@ from test_openclaw_build_script import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PUBLISH_SCRIPT = REPO_ROOT / "publish-openclaw-local-dockerfile.sh"
-OPENCLAW_VERSION = "2026.10.8"
+OPENCLAW_VERSION = "2026.10.9"
 
 
 def build_env(bin_dir: Path, log_path: Path, missing_env_file: Path) -> dict[str, str]:
@@ -184,7 +184,7 @@ def test_publisher_prefers_env_file_repository_tag_and_pins(tmp_path: Path) -> N
     env_file = tmp_path / "publish.env"
     env_file.write_text(
         'OPENCLAW_PUBLISH_IMAGE="file/guest"\nIMAGE_TAG="custom-tag"\n'
-        'OPENCLAW_VERSION="2026.10.8"\nGOGCLI_AMD64_SHA256="custom-amd64"\n'
+        'OPENCLAW_VERSION="2026.10.9"\nGOGCLI_AMD64_SHA256="custom-amd64"\n'
     )
     environment = build_env(bin_dir, log_path, env_file)
     environment.update(OPENCLAW_PUBLISH_IMAGE="process/guest", IMAGE_TAG="inherited")

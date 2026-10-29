@@ -23,7 +23,7 @@ Copy `.env.example` to `.env` if you want project-local configuration. Both scri
 The local build loads one target (default `linux/arm64`) and defaults to `openclaw:local`. Its tag must match the engine's `MARACLAW_OPENCLAW_IMAGE` and it must be loaded on the same Docker daemon used by the worker. For example, with no overriding assignment in the selected env file:
 
 ```bash
-MARACLAW_OPENCLAW_IMAGE=openclaw:2026.10.8 ./build-openclaw-local-dockerfile.sh
+MARACLAW_OPENCLAW_IMAGE=openclaw:2026.10.9 ./build-openclaw-local-dockerfile.sh
 ```
 
 Set `DOCKER_PLATFORM=linux/amd64` for the other supported target. Keep the OpenClaw version and checksum aligned with the intended image tag.
