@@ -20,9 +20,14 @@ Build and load one local OpenClaw image. Environment settings:
   OFFICECLI_ARM64_SHA256       default: a27778548f2820771f54a70887af3c3ec214fe60e63b32836b09b3f3e2c4c493
   OFFICECLI_AMD64_SHA256       default: 92d9aeed324d91ed2a107f7f8dc7468829b14390a66cf2bbdfb25c40beac50ea
   OFFICECLI_SKILL_SHA256       default: c950d285ce60021712b4753fb2d9f592308d5622bab776229061dfecb1ce55d4
+  GOGCLI_SKILLS_COMMIT         optional gogcli-skills archive commit (default: installer pin)
+  GOGCLI_SKILLS_SHA256         optional gogcli-skills archive digest (default: installer pin)
+  CLAWSEC_COMMIT               optional Soul Guardian archive commit (default: installer pin)
+  CLAWSEC_SHA256               optional Soul Guardian archive digest (default: installer pin)
 
 The selected env file is sourced from the script directory if it exists;
 its assignments override inherited environment values. Empty values use defaults.
+The four archive pins are forwarded only when nonempty.
 The target architecture is prepended literally to the image name:
   ./build-openclaw-local-dockerfile.sh  -> arm64-openclaw:local
   DOCKER_PLATFORM=linux/amd64 MARACLAW_OPENCLAW_IMAGE=workspace/openclaw:custom \
@@ -74,6 +79,14 @@ esac
 
 LOCAL_IMAGE="${DOCKER_PLATFORM#linux/}-${MARACLAW_OPENCLAW_IMAGE:-openclaw:local}"
 
+PIN_ARGS=()
+for pin_name in GOGCLI_SKILLS_COMMIT GOGCLI_SKILLS_SHA256 CLAWSEC_COMMIT CLAWSEC_SHA256; do
+    pin_value="${!pin_name:-}"
+    if [ -n "$pin_value" ]; then
+        PIN_ARGS+=(--build-arg "$pin_name=$pin_value")
+    fi
+done
+
 ASSET_ARGS=()
 case "${OPENCLAW_ASSET_MODE:-online}" in
     online) ;;
@@ -108,6 +121,7 @@ docker buildx build \
     --build-arg OFFICECLI_ARM64_SHA256="$OFFICECLI_ARM64_SHA256" \
     --build-arg OFFICECLI_AMD64_SHA256="$OFFICECLI_AMD64_SHA256" \
     --build-arg OFFICECLI_SKILL_SHA256="$OFFICECLI_SKILL_SHA256" \
+    ${PIN_ARGS[@]+"${PIN_ARGS[@]}"} \
     ${ASSET_ARGS[@]+"${ASSET_ARGS[@]}"} \
     -t "$LOCAL_IMAGE" \
     --load \

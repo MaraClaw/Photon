@@ -1,4 +1,5 @@
 import os
+import shlex
 import stat
 import subprocess
 from pathlib import Path
@@ -20,6 +21,27 @@ OFFICECLI_PINS = {
     "OFFICECLI_AMD64_SHA256": "92d9aeed324d91ed2a107f7f8dc7468829b14390a66cf2bbdfb25c40beac50ea",
     "OFFICECLI_SKILL_SHA256": "c950d285ce60021712b4753fb2d9f592308d5622bab776229061dfecb1ce55d4",
 }
+ARCHIVE_PIN_NAMES = ("GOGCLI_SKILLS_COMMIT", "GOGCLI_SKILLS_SHA256", "CLAWSEC_COMMIT", "CLAWSEC_SHA256")
+
+
+def read_docker_argv(log_path: Path) -> list[str]:
+    return Path(f"{log_path}.argv").read_bytes().decode().split("\0")[:-1]
+
+
+def forwarded_archive_pins(argv: list[str]) -> dict[str, str]:
+    pins = {
+        name: value
+        for flag, assignment in zip(argv, argv[1:], strict=False)
+        if flag == "--build-arg"
+        for name, _, value in (assignment.partition("="),)
+        if name in ARCHIVE_PIN_NAMES
+    }
+    assert sum(argument.startswith(tuple(f"{name}=" for name in ARCHIVE_PIN_NAMES)) for argument in argv) == len(pins)
+    return pins
+
+
+def write_env_file(path: Path, assignments: dict[str, str]) -> None:
+    path.write_text("".join(f"{name}={shlex.quote(value)}\n" for name, value in assignments.items()), encoding="utf-8")
 
 
 def install_fake_docker(root: Path) -> tuple[Path, Path]:
@@ -267,8 +289,8 @@ def test_openclaw_build_script_rejects_unsupported_or_multiple_platforms(tmp_pat
 @pytest.mark.parametrize(
     ("architecture", "digest"),
     [
-        ("amd64", "0081cd01c832e6db2ddb040a3dd4c7d282c4068c57a39280c6a40b2853ec000e"),
-        ("arm64", "0d79217e1afd8ec1657305749dc3eb187963ab7934e35f89ac40c5bb4a165f07"),
+        ("amd64", "3c45cf49e17d07d2ce8a27e995c25c9c64e57d0c91bd776f918d683fdcb9069d"),
+        ("arm64", "de39a37d045520df746d4c5d9e5ca9f6ccc598eebd32400b194c2bb6462b12b2"),
     ],
 )
 def test_dockerfile_selects_pinned_base_for_target_architecture(architecture: str, digest: str) -> None:
@@ -385,3 +407,32 @@ def test_invalid_asset_configuration_rejected_before_build(tmp_path: Path, mode:
     result = run_build_script(env)
     assert result.returncode != 0
     assert not log_path.exists()
+
+
+@pytest.mark.parametrize("architecture", ["amd64", "arm64"])
+def test_staged_local_build_keeps_staged_arguments_with_archive_pins(tmp_path: Path, architecture: str) -> None:
+    # Given
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    assets = tmp_path / "assets with spaces"
+    for name in (f"linux-{architecture}/gogcli.tar.gz", f"linux-{architecture}/officecli",
+                 "common/officecli-SKILL.md", "common/gogcli-skills.tar.gz", "common/soul-guardian.tar.gz"):
+        path = assets / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    pins = {name: f"staged {name}" for name in ARCHIVE_PIN_NAMES}
+    env = build_env(bin_dir, log_path, tmp_path / "missing.env") | pins | {
+        "DOCKER_PLATFORM": f"linux/{architecture}", "OPENCLAW_ASSET_MODE": "staged", "OPENCLAW_ASSET_DIR": str(assets),
+    }
+
+    # When
+    result = run_build_script(env)
+
+    # Then
+    assert result.returncode == 0, result.stderr
+    args = read_docker_argv(log_path)
+    assert forwarded_archive_pins(args) == pins
+    assert args[args.index("--build-context") + 1] == f"openclaw_assets={assets.resolve()}"
+    assert "OPENCLAW_ASSET_MODE=staged" in args
+    assert args[args.index("--platform") + 1] == f"linux/{architecture}"
+    assert args[args.index("-t") + 1] == f"{architecture}-openclaw:local"
+    assert "--load" in args and "--push" not in args

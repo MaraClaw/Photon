@@ -17,6 +17,8 @@
 #   OPENCLAW_VERSION, OPENCLAW_SHA256, GOGCLI_VERSION, GOGCLI_{AMD64,ARM64}_SHA256
 #   OFFICECLI_VERSION, OFFICECLI_{AMD64,ARM64,SKILL}_SHA256
 #                           same pins as the local build script
+#   GOGCLI_SKILLS_{COMMIT,SHA256}, CLAWSEC_{COMMIT,SHA256}
+#                           optional archive pins, forwarded only when nonempty
 #
 # Requires an existing `docker login` to Docker Hub. This script does not store credentials.
 
@@ -72,6 +74,14 @@ if ! printf '%s' "$IMAGE_TAG" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]*$'; then
     exit 2
 fi
 
+PIN_ARGS=()
+for pin_name in GOGCLI_SKILLS_COMMIT GOGCLI_SKILLS_SHA256 CLAWSEC_COMMIT CLAWSEC_SHA256; do
+    pin_value="${!pin_name:-}"
+    if [ -n "$pin_value" ]; then
+        PIN_ARGS+=(--build-arg "$pin_name=$pin_value")
+    fi
+done
+
 ASSET_ARGS=()
 case "${OPENCLAW_ASSET_MODE:-online}" in
     online) ;;
@@ -114,6 +124,7 @@ docker buildx build \
     --build-arg OFFICECLI_ARM64_SHA256="$OFFICECLI_ARM64_SHA256" \
     --build-arg OFFICECLI_AMD64_SHA256="$OFFICECLI_AMD64_SHA256" \
     --build-arg OFFICECLI_SKILL_SHA256="$OFFICECLI_SKILL_SHA256" \
+    ${PIN_ARGS[@]+"${PIN_ARGS[@]}"} \
     ${ASSET_ARGS[@]+"${ASSET_ARGS[@]}"} \
     "${TAGS[@]}" \
     --push \

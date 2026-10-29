@@ -2,8 +2,8 @@ import json
 import shlex
 from pathlib import Path
 
+from test_openclaw_build_script import ARCHIVE_PIN_NAMES, OFFICECLI_PINS
 from test_openclaw_officecli_dockerfile import _instructions
-from test_openclaw_build_script import OFFICECLI_PINS
 
 DOCKERFILE = Path(__file__).resolve().parents[1] / "Dockerfile.openclaw"
 
@@ -24,6 +24,37 @@ def test_officecli_build_arguments_are_available_to_installer_but_not_runtime() 
             install_args = active_args.copy()
     assert {name: install_args[name] for name in OFFICECLI_PINS} == OFFICECLI_PINS
     assert not runtime_env.intersection(OFFICECLI_PINS)
+
+
+def test_archive_pin_arguments_are_final_stage_defaultless_and_not_runtime_env() -> None:
+    instructions, errors = _instructions(DOCKERFILE.read_text())
+    assert not errors
+    global_args: set[str] = set()
+    stage_args: list[str] = []
+    runtime_env: set[str] = set()
+    installer_args: dict[str, list[str]] = {}
+    stage_count = 0
+    for instruction, body in instructions:
+        if instruction == "FROM":
+            stage_count += 1
+            stage_args = []
+        if instruction == "ARG":
+            if stage_count == 0:
+                global_args.add(body.partition("=")[0])
+            stage_args.append(body)
+        if instruction == "ENV":
+            runtime_env.update(token.partition("=")[0] for token in shlex.split(body))
+        if instruction == "RUN":
+            for installer in ("install-gogcli-skills", "install-soul-guardian"):
+                if f"sh /tmp/{installer}.sh" in body:
+                    installer_args[installer] = stage_args.copy()
+    assert stage_count == 4
+    assert not global_args.intersection(ARCHIVE_PIN_NAMES)
+    assert set(installer_args) == {"install-gogcli-skills", "install-soul-guardian"}
+    for declared in installer_args.values():
+        for name in ARCHIVE_PIN_NAMES:
+            assert declared.count(name) == 1
+    assert not runtime_env.intersection(ARCHIVE_PIN_NAMES)
 
 
 def test_image_installs_pinned_cli_and_runs_validator_as_entrypoint() -> None:
