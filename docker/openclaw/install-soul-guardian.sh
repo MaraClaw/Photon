@@ -1,9 +1,13 @@
 #!/bin/sh
 set -eu
 
-CLAWSEC_COMMIT="03c19784f6c1e83ac81da2857f996ac9557dcceb"
-CLAWSEC_SHA256="2bef41a7e6a071ad4342c80de08802afdfe2f35c29ad623d36e7f56fd6baa2d6"
+CLAWSEC_COMMIT=${CLAWSEC_COMMIT:-03c19784f6c1e83ac81da2857f996ac9557dcceb}
+CLAWSEC_SHA256=${CLAWSEC_SHA256:-2bef41a7e6a071ad4342c80de08802afdfe2f35c29ad623d36e7f56fd6baa2d6}
 readonly CLAWSEC_COMMIT CLAWSEC_SHA256
+case $CLAWSEC_COMMIT in
+    *[!0123456789abcdef]*) printf 'invalid clawsec commit: expected 40 lowercase hex characters\n' >&2; exit 2 ;;
+esac
+[ "${#CLAWSEC_COMMIT}" -eq 40 ] || { printf 'invalid clawsec commit: expected 40 lowercase hex characters\n' >&2; exit 2; }
 
 archive_file=
 while [ "$#" -gt 0 ]; do
