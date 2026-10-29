@@ -1,9 +1,13 @@
 #!/bin/sh
 set -eu
 
-GOGCLI_SKILLS_COMMIT="b8298ae6fd5335ddebc4bc8594e3b09aa3020ab4"
-GOGCLI_SKILLS_SHA256="e1f4de9af4ef3f1607121ab68aef383dd2803a9450977abbab01cf1112df6d25"
+GOGCLI_SKILLS_COMMIT=${GOGCLI_SKILLS_COMMIT:-b8298ae6fd5335ddebc4bc8594e3b09aa3020ab4}
+GOGCLI_SKILLS_SHA256=${GOGCLI_SKILLS_SHA256:-e1f4de9af4ef3f1607121ab68aef383dd2803a9450977abbab01cf1112df6d25}
 readonly GOGCLI_SKILLS_COMMIT GOGCLI_SKILLS_SHA256
+case $GOGCLI_SKILLS_COMMIT in
+    *[!0123456789abcdef]*) printf 'invalid gogcli skills commit: expected 40 lowercase hex characters\n' >&2; exit 2 ;;
+esac
+[ "${#GOGCLI_SKILLS_COMMIT}" -eq 40 ] || { printf 'invalid gogcli skills commit: expected 40 lowercase hex characters\n' >&2; exit 2; }
 
 archive_file=
 ownership_output=
