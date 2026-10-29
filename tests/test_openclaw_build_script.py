@@ -43,7 +43,7 @@ def build_env(bin_dir: Path, log_path: Path, missing_env_file: Path) -> dict[str
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
     env.pop("MARACLAW_OPENCLAW_IMAGE", None)
     env.pop("DOCKER_PLATFORM", None)
-    for name in OFFICECLI_PINS:
+    for name in (*OFFICECLI_PINS, *ARCHIVE_PIN_NAMES):
         env.pop(name, None)
     return env
 
