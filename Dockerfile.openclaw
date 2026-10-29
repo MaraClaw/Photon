@@ -112,8 +112,10 @@ COPY docker/openclaw/validate-soul-guardian.sh /usr/local/bin/validate-soul-guar
 COPY docker/openclaw/validate-linkup.sh /usr/local/bin/validate-linkup.sh
 COPY docker/openclaw/startup-probe.sh /usr/local/bin/startup-probe.sh
 COPY docker/openclaw/startup-probe.py /usr/local/bin/startup-probe.py
-RUN chmod 0755 /usr/local/bin/validate-officecli.sh /usr/local/bin/validate-soul-guardian.sh /usr/local/bin/validate-linkup.sh /usr/local/bin/startup-probe.sh /usr/local/bin/startup-probe.py
+COPY docker/openclaw/bootstrap_event.py /usr/local/bin/bootstrap_event.py
+COPY docker/openclaw/bootstrap-agent-container.py /usr/local/bin/bootstrap-agent-container.py
+RUN chmod 0755 /usr/local/bin/validate-officecli.sh /usr/local/bin/validate-soul-guardian.sh /usr/local/bin/validate-linkup.sh /usr/local/bin/startup-probe.sh /usr/local/bin/startup-probe.py /usr/local/bin/bootstrap_event.py /usr/local/bin/bootstrap-agent-container.py
 
 USER node
-ENTRYPOINT ["tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh", "/usr/local/bin/validate-officecli.sh", "/usr/local/bin/validate-soul-guardian.sh", "/usr/local/bin/validate-linkup.sh"]
+ENTRYPOINT ["tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh", "/usr/local/bin/validate-officecli.sh", "/usr/local/bin/validate-soul-guardian.sh", "/usr/local/bin/validate-linkup.sh", "/usr/local/bin/bootstrap-agent-container.py"]
 CMD ["openclaw", "gateway"]

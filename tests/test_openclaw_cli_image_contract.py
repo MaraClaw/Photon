@@ -65,7 +65,7 @@ def test_image_installs_pinned_cli_and_runs_validator_as_entrypoint() -> None:
     assert json.loads(entrypoint.removeprefix("ENTRYPOINT ")) == [
         "tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh",
         "/usr/local/bin/validate-officecli.sh", "/usr/local/bin/validate-soul-guardian.sh",
-        "/usr/local/bin/validate-linkup.sh",
+        "/usr/local/bin/validate-linkup.sh", "/usr/local/bin/bootstrap-agent-container.py",
     ]
     assert json.loads(command.removeprefix("CMD ")) == ["openclaw", "gateway"]
     assert "COPY docker/openclaw/install-officecli.sh /tmp/install-officecli.sh" in lines
@@ -103,9 +103,11 @@ def test_image_installs_pinned_cli_and_runs_validator_as_entrypoint() -> None:
 def test_image_installs_and_includes_probe_helpers() -> None:
     lines = DOCKERFILE.read_text().splitlines()
     allowed = (DOCKERFILE.parent / ".dockerignore").read_text().splitlines()
-    for helper in ("startup-probe.sh", "startup-probe.py"):
+    for helper in ("startup-probe.sh", "startup-probe.py", "bootstrap_event.py", "bootstrap-agent-container.py"):
         assert f"COPY docker/openclaw/{helper} /usr/local/bin/{helper}" in lines
         assert f"!docker/openclaw/{helper}" in allowed
+    chmod = next(line for line in lines if line.startswith("RUN chmod 0755 /usr/local/bin/validate-officecli.sh"))
+    assert {"/usr/local/bin/bootstrap_event.py", "/usr/local/bin/bootstrap-agent-container.py"} <= set(shlex.split(chmod))
 
 
 def test_officecli_flags_are_effective_for_install_and_gateway() -> None:
