@@ -12,6 +12,9 @@ ROOT: Final = Path(__file__).resolve().parents[1]
 INSTALLER: Final = ROOT / "docker/openclaw/install-soul-guardian.sh"
 COMMIT: Final = "03c19784f6c1e83ac81da2857f996ac9557dcceb"
 PIN: Final = "2bef41a7e6a071ad4342c80de08802afdfe2f35c29ad623d36e7f56fd6baa2d6"
+OTHER_COMMIT: Final = "0123456789abcdef0123456789abcdef01234567"
+COMMIT_KEY: Final = "CLAWSEC_COMMIT"
+SHA_KEY: Final = "CLAWSEC_SHA256"
 
 
 @pytest.fixture
@@ -32,7 +35,7 @@ def install_fixture(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     with tarfile.open(archive, "w:gz") as tar:
         tar.add(source, arcname=source.name)
     script = tmp_path / "installer.sh"
-    script.write_text(INSTALLER.read_text().replace(PIN, hashlib.sha256(archive.read_bytes()).hexdigest()))
+    shutil.copy(INSTALLER, script)
     script.chmod(0o755)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -53,7 +56,8 @@ def install_fixture(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     (destination / "officecli/SKILL.md").write_text("officecli")
     stages = tmp_path / "stages"
     stages.mkdir()
-    env = os.environ | {
+    env = {key: value for key, value in os.environ.items() if key not in (COMMIT_KEY, SHA_KEY)} | {
+        SHA_KEY: hashlib.sha256(archive.read_bytes()).hexdigest(),
         "PATH": f'{bin_dir}:{os.environ["PATH"]}',
         "ARCHIVE": str(archive),
         "NPM_ROOT": str(tmp_path / "npm root"),
@@ -196,3 +200,106 @@ def test_restoration_failure_retains_backup(install_fixture: tuple[Path, dict[st
     stages = list(Path(env["TMPDIR"]).iterdir())
     assert len(stages) == 1 and str(stages[0]) in result.stderr, result.stderr
     assert (stages[0] / "backup/stale").read_text() == "old"
+
+
+def alternate_archive(script: Path, commit: str) -> Path:
+    archive = script.parent / "alternate.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.add(script.parent / f"clawsec-{COMMIT}", arcname=f"clawsec-{commit}")
+    return archive
+
+
+def install_tar_marker(script: Path) -> Path:
+    marker = script.parent / "tar-ran"
+    real_tar = shutil.which("tar")
+    assert real_tar is not None
+    tar = script.parent / "bin/tar"
+    tar.write_text(f'#!/bin/sh\n: > "{marker}"\nexec "{real_tar}" "$@"\n')
+    tar.chmod(0o755)
+    return marker
+
+
+def run_installer(script: Path, env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["sh", str(script), *args], env=env, capture_output=True, text=True, check=False, timeout=10)
+
+
+def unpinned(env: dict[str, str], **pins: str) -> dict[str, str]:
+    return {key: value for key, value in env.items() if key not in (COMMIT_KEY, SHA_KEY)} | pins
+
+
+@pytest.mark.parametrize("mode", ["download", "local"])
+def test_overridden_pins_select_archive_and_digest(install_fixture: tuple[Path, dict[str, str]], mode: str) -> None:
+    script, env = install_fixture
+    archive = alternate_archive(script, OTHER_COMMIT)
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    assert digest != PIN
+    args = ["--archive-file", str(archive)] if mode == "local" else []
+    result = run_installer(script, env | {"ARCHIVE": str(archive), COMMIT_KEY: OTHER_COMMIT, SHA_KEY: digest}, *args)
+    assert result.returncode == 0, result.stderr
+    installed = Path(env["NPM_ROOT"]) / "openclaw/skills/soul-guardian"
+    assert (installed / "LICENSE").read_text() == "upstream license\n"
+    assert not (installed / "stale").exists()
+    if mode == "download":
+        assert Path(env["CURL_LOG"]).read_text().strip().endswith(f"/tar.gz/{OTHER_COMMIT}")
+    else:
+        assert not Path(env["CURL_LOG"]).exists()
+
+
+@pytest.mark.parametrize("empty", [False, True])
+def test_default_pins_apply_when_unset_or_empty(install_fixture: tuple[Path, dict[str, str]], empty: bool) -> None:
+    script, env = install_fixture
+    result = run_installer(script, unpinned(env, **({COMMIT_KEY: "", SHA_KEY: ""} if empty else {})))
+    assert result.returncode != 0  # the default digest rejects the fixture archive
+    assert Path(env["CURL_LOG"]).read_text().strip().endswith(f"/tar.gz/{COMMIT}")
+    assert (Path(env["NPM_ROOT"]) / "openclaw/skills/soul-guardian/stale").read_text() == "old"
+
+
+def test_partial_resolution_resolves_each_pin_independently(install_fixture: tuple[Path, dict[str, str]]) -> None:
+    script, env = install_fixture
+    curl_log = Path(env["CURL_LOG"])
+    commit_only = run_installer(script, unpinned(env, **{COMMIT_KEY: OTHER_COMMIT, SHA_KEY: ""}))
+    assert commit_only.returncode != 0  # default digest still applies
+    assert curl_log.read_text().strip().endswith(f"/tar.gz/{OTHER_COMMIT}")
+    digest_only = run_installer(script, unpinned(env, **{COMMIT_KEY: "", SHA_KEY: env[SHA_KEY]}))
+    assert digest_only.returncode == 0, digest_only.stderr
+    assert curl_log.read_text().strip().endswith(f"/tar.gz/{COMMIT}")
+
+
+@pytest.mark.parametrize(
+    "commit",
+    [OTHER_COMMIT[:-1], OTHER_COMMIT + "0", OTHER_COMMIT.upper(), OTHER_COMMIT[:-1] + "g", OTHER_COMMIT[:-1] + "\n",
+     OTHER_COMMIT[:-2] + "$x", OTHER_COMMIT[:-2] + "/.", OTHER_COMMIT[:-2] + "*?", OTHER_COMMIT[:-2] + ";x"],
+)
+@pytest.mark.parametrize("mode", ["download", "local"])
+def test_malformed_commit_is_rejected_before_acquisition(
+    install_fixture: tuple[Path, dict[str, str]], commit: str, mode: str
+) -> None:
+    script, env = install_fixture
+    cp = script.parent / "bin/cp"
+    cp.write_text('#!/bin/sh\n: > "$CP_LOG"\n')
+    cp.chmod(0o755)
+    marker = install_tar_marker(script)
+    args = ["--archive-file", env["ARCHIVE"]] if mode == "local" else []
+    result = run_installer(script, env | {COMMIT_KEY: commit, "CP_LOG": str(script.parent / "cp.log")}, *args)
+    assert result.returncode == 2
+    assert not Path(env["CURL_LOG"]).exists()
+    assert not (script.parent / "cp.log").exists()
+    assert not marker.exists()
+    assert (Path(env["NPM_ROOT"]) / "openclaw/skills/soul-guardian/stale").read_text() == "old"
+    assert not list(Path(env["TMPDIR"]).iterdir())
+
+
+@pytest.mark.parametrize("mode", ["download", "local"])
+@pytest.mark.parametrize("digest", [PIN, "0" * 64])
+def test_wrong_digest_is_rejected_before_extraction_or_mutation(
+    install_fixture: tuple[Path, dict[str, str]], mode: str, digest: str
+) -> None:
+    script, env = install_fixture
+    marker = install_tar_marker(script)
+    args = ["--archive-file", env["ARCHIVE"]] if mode == "local" else []
+    result = run_installer(script, env | {SHA_KEY: digest}, *args)
+    assert result.returncode != 0
+    assert not marker.exists()
+    skills = Path(env["NPM_ROOT"]) / "openclaw/skills"
+    assert (skills / "soul-guardian/stale").read_text() == "old"
+    assert not list(Path(env["TMPDIR"]).iterdir())

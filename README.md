@@ -12,6 +12,10 @@ Each external validation probe has a 30-second deadline and a 2-second terminati
 
 The shared Python supervisor terminates the probe process group, escalates to KILL after the grace on timeout or cancellation, and reaps owned descendants on Linux. Residual group members are terminated on ordinary completion too. This covers non-daemonizing probes that stay in their process group, not escaped sessions or uninterruptible kernel waits. The final command is executed unchanged, outside the deadline, after supervision and capture files have been removed. Direct validator use requires POSIX sh, Python 3 with `waitid`/`WNOWAIT`, writable temporary storage, and both `startup-probe` helpers beside the validator; Linux also requires working `prctl` subreaper support. Darwin supports process-group termination for host tests; Linux is the descendant-reaping authority.
 
+## Bootstrap completion event
+
+The last entrypoint stage, `bootstrap-agent-container.py`, starts `openclaw gateway`, waits for its real loopback `/readyz` (`--port`, else `OPENCLAW_GATEWAY_PORT`, else 18789; within `OPENCLAW_BOOTSTRAP_TIMEOUT_SECONDS`, default 120) and only then publishes `/tmp/maraclaw-bootstrap/AgentBootstrapCompleted.json`, bound to the current kernel boot id and PID 1 start time. An event from an earlier boot or container start never authorizes the next run. In the guest, `bootstrap-agent-container.py check-ready` and `bootstrap-agent-container.py exec -- <action>` require the current event and exit 75 while bootstrap is pending. Every other command is exec'd unchanged. A MaraClaw engine that waits for this event must run with an image built from this chain; older images never emit it and there is no fallback.
+
 ## Local build
 
 Copy `.env.example` to `.env` if you want project-local configuration. Both scripts change to the Photon directory and source `.env` by default; assignments in that file override inherited environment variables. Set `ENV_FILE` to an explicit path to source a different file, or to a nonexistent path to use only the process environment and script defaults.
@@ -19,7 +23,7 @@ Copy `.env.example` to `.env` if you want project-local configuration. Both scri
 The local build loads one target (default `linux/arm64`) and defaults to `openclaw:local`. Its tag must match the engine's `MARACLAW_OPENCLAW_IMAGE` and it must be loaded on the same Docker daemon used by the worker. For example, with no overriding assignment in the selected env file:
 
 ```bash
-MARACLAW_OPENCLAW_IMAGE=openclaw:2026.10.8 ./build-openclaw-local-dockerfile.sh
+MARACLAW_OPENCLAW_IMAGE=openclaw:2026.10.9 ./build-openclaw-local-dockerfile.sh
 ```
 
 Set `DOCKER_PLATFORM=linux/amd64` for the other supported target. Keep the OpenClaw version and checksum aligned with the intended image tag.

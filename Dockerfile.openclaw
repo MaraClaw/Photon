@@ -1,5 +1,5 @@
-ARG OPENCLAW_BASE_IMAGE_AMD64=nikolaik/python-nodejs@sha256:0081cd01c832e6db2ddb040a3dd4c7d282c4068c57a39280c6a40b2853ec000e
-ARG OPENCLAW_BASE_IMAGE_ARM64=nikolaik/python-nodejs@sha256:0d79217e1afd8ec1657305749dc3eb187963ab7934e35f89ac40c5bb4a165f07
+ARG OPENCLAW_BASE_IMAGE_AMD64=nikolaik/python-nodejs@sha256:3c45cf49e17d07d2ce8a27e995c25c9c64e57d0c91bd776f918d683fdcb9069d
+ARG OPENCLAW_BASE_IMAGE_ARM64=nikolaik/python-nodejs@sha256:de39a37d045520df746d4c5d9e5ca9f6ccc598eebd32400b194c2bb6462b12b2
 FROM scratch AS openclaw_assets
 FROM ${OPENCLAW_BASE_IMAGE_AMD64} AS base_amd64
 FROM ${OPENCLAW_BASE_IMAGE_ARM64} AS base_arm64
@@ -9,8 +9,8 @@ SHELL ["/bin/sh", "-c"]
 ARG TARGETOS
 ARG TARGETARCH
 ARG OPENCLAW_ASSET_MODE=online
-ARG OPENCLAW_VERSION=2026.10.8
-ARG OPENCLAW_SHA256=sha256:7e36685a0b5fd9c8c3afcfa93ee33fad871f7c6c8b6e695cae6720d14a765f18
+ARG OPENCLAW_VERSION=2026.10.9
+ARG OPENCLAW_SHA256=sha256:43c61a00ef2c73416a072a7216cb3be80555d6740199f07194da2714283b04ab
 ARG TINI_VERSION=0.19.0-3+b8
 ARG CA_CERTIFICATES_VERSION=20250419+deb13u1
 ARG CURL_VERSION=8.14.1-2+deb13u7
@@ -24,6 +24,10 @@ ARG OFFICECLI_VERSION=v1.0.159
 ARG OFFICECLI_ARM64_SHA256=a27778548f2820771f54a70887af3c3ec214fe60e63b32836b09b3f3e2c4c493
 ARG OFFICECLI_AMD64_SHA256=92d9aeed324d91ed2a107f7f8dc7468829b14390a66cf2bbdfb25c40beac50ea
 ARG OFFICECLI_SKILL_SHA256=c950d285ce60021712b4753fb2d9f592308d5622bab776229061dfecb1ce55d4
+ARG GOGCLI_SKILLS_COMMIT
+ARG GOGCLI_SKILLS_SHA256
+ARG CLAWSEC_COMMIT
+ARG CLAWSEC_SHA256
 
 USER root
 RUN apt-get update \
@@ -108,8 +112,10 @@ COPY docker/openclaw/validate-soul-guardian.sh /usr/local/bin/validate-soul-guar
 COPY docker/openclaw/validate-linkup.sh /usr/local/bin/validate-linkup.sh
 COPY docker/openclaw/startup-probe.sh /usr/local/bin/startup-probe.sh
 COPY docker/openclaw/startup-probe.py /usr/local/bin/startup-probe.py
-RUN chmod 0755 /usr/local/bin/validate-officecli.sh /usr/local/bin/validate-soul-guardian.sh /usr/local/bin/validate-linkup.sh /usr/local/bin/startup-probe.sh /usr/local/bin/startup-probe.py
+COPY docker/openclaw/bootstrap_event.py /usr/local/bin/bootstrap_event.py
+COPY docker/openclaw/bootstrap-agent-container.py /usr/local/bin/bootstrap-agent-container.py
+RUN chmod 0755 /usr/local/bin/validate-officecli.sh /usr/local/bin/validate-soul-guardian.sh /usr/local/bin/validate-linkup.sh /usr/local/bin/startup-probe.sh /usr/local/bin/startup-probe.py /usr/local/bin/bootstrap_event.py /usr/local/bin/bootstrap-agent-container.py
 
 USER node
-ENTRYPOINT ["tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh", "/usr/local/bin/validate-officecli.sh", "/usr/local/bin/validate-soul-guardian.sh", "/usr/local/bin/validate-linkup.sh"]
+ENTRYPOINT ["tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh", "/usr/local/bin/validate-officecli.sh", "/usr/local/bin/validate-soul-guardian.sh", "/usr/local/bin/validate-linkup.sh", "/usr/local/bin/bootstrap-agent-container.py"]
 CMD ["openclaw", "gateway"]

@@ -5,7 +5,7 @@ Guest **OpenClaw agent image** helpers. Not the FastAPI API. Image contract also
 ## Chain
 
 ```
-tini -s -- validate-gogcli.sh validate-officecli.sh validate-soul-guardian.sh validate-linkup.sh openclaw gateway
+tini -s -- validate-gogcli.sh validate-officecli.sh validate-soul-guardian.sh validate-linkup.sh bootstrap-agent-container.py openclaw gateway
 USER: node
 ```
 
@@ -17,6 +17,15 @@ USER: node
 | `validate-officecli.sh` | entrypoint | Verify OfficeCLI and exec the supplied command unchanged |
 | `validate-soul-guardian.sh` | entrypoint | Verify the skill assets and non-mutating help probe, then exec the supplied command unchanged |
 | `validate-linkup.sh` | entrypoint | Verify the two bundled Linkup skills and references offline, then exec the supplied command unchanged |
+| `bootstrap-agent-container.py` | entrypoint (last), `docker exec` | Publish and enforce `AgentBootstrapCompleted` (see below); imports `bootstrap_event.py`, which owns the guest identity and the event file |
+
+## Bootstrap event
+
+`bootstrap-agent-container.py` runs after all four validators. Any command except the long-running `openclaw gateway [run] [--options]` (so also `openclaw gateway status`) is exec'd unchanged and emits nothing. For the gateway it launches one child, waits for the real loopback `/readyz` (port from `--port`, else `OPENCLAW_GATEWAY_PORT`, else 18789, as OpenClaw itself resolves it, so set the env var if `gateway.port` in `openclaw.json` differs; budget `OPENCLAW_BOOTSTRAP_TIMEOUT_SECONDS`, default 120), confirms the child is still alive, then atomically publishes `/tmp/maraclaw-bootstrap/AgentBootstrapCompleted.json`: `{"version":1,"event":"AgentBootstrapCompleted","boot_id":<kernel boot id>,"pid1_start_ticks":"<PID 1 /proc stat field 22>"}`. It then relays signals and exits with the child's status. Early exit, timeout (124) or HUP/INT/QUIT/TERM before readiness publish nothing and leave no child.
+
+The event is valid only while both identity values match the running guest, so a file left by an earlier boot or container start never authorizes this one; removal is hygiene, not the guard. `check-ready` validates the event and then probes `/readyz` (0 ready, 1 not ready); `exec -- ACTION...` validates it and then execs the action. Both exit 75 while bootstrap is pending (missing, malformed, unsupported or mismatched event) and nothing is cached.
+
+The engine and the image are a matched pair: an image built without this helper never emits the event, and there is no fallback for it.
 
 ## Pins
 

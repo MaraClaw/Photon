@@ -11,8 +11,8 @@ Build and load one local OpenClaw image. Environment settings:
   ENV_FILE                     env file to source (default: .env)
   OPENCLAW_ASSET_MODE          online (default) or staged
   OPENCLAW_ASSET_DIR           asset directory required in staged mode
-  OPENCLAW_VERSION             default: 2026.10.8
-  OPENCLAW_SHA256              default: sha256:7e36685a0b5fd9c8c3afcfa93ee33fad871f7c6c8b6e695cae6720d14a765f18
+  OPENCLAW_VERSION             default: 2026.10.9
+  OPENCLAW_SHA256              default: sha256:43c61a00ef2c73416a072a7216cb3be80555d6740199f07194da2714283b04ab
   GOGCLI_VERSION               default: 0.47.1
   GOGCLI_AMD64_SHA256          default: sha256:279bc3a03c1919d774e268ef229949f45b753a0e21257f9fb315b05be7a40ea9
   GOGCLI_ARM64_SHA256          default: sha256:c677ac6abf5e187e987a87fe1b588f454b002a7d7019de81b9e8db02e9e902b6
@@ -20,9 +20,14 @@ Build and load one local OpenClaw image. Environment settings:
   OFFICECLI_ARM64_SHA256       default: a27778548f2820771f54a70887af3c3ec214fe60e63b32836b09b3f3e2c4c493
   OFFICECLI_AMD64_SHA256       default: 92d9aeed324d91ed2a107f7f8dc7468829b14390a66cf2bbdfb25c40beac50ea
   OFFICECLI_SKILL_SHA256       default: c950d285ce60021712b4753fb2d9f592308d5622bab776229061dfecb1ce55d4
+  GOGCLI_SKILLS_COMMIT         optional gogcli-skills archive commit (default: installer pin)
+  GOGCLI_SKILLS_SHA256         optional gogcli-skills archive digest (default: installer pin)
+  CLAWSEC_COMMIT               optional Soul Guardian archive commit (default: installer pin)
+  CLAWSEC_SHA256               optional Soul Guardian archive digest (default: installer pin)
 
 The selected env file is sourced from the script directory if it exists;
 its assignments override inherited environment values. Empty values use defaults.
+The four archive pins are forwarded only when nonempty.
 The target architecture is prepended literally to the image name:
   ./build-openclaw-local-dockerfile.sh  -> arm64-openclaw:local
   DOCKER_PLATFORM=linux/amd64 MARACLAW_OPENCLAW_IMAGE=workspace/openclaw:custom \
@@ -53,8 +58,8 @@ if [ -f "$ENV_FILE" ]; then
     set +a
 fi
 
-OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.10.8}"
-OPENCLAW_SHA256="${OPENCLAW_SHA256:-sha256:7e36685a0b5fd9c8c3afcfa93ee33fad871f7c6c8b6e695cae6720d14a765f18}"
+OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.10.9}"
+OPENCLAW_SHA256="${OPENCLAW_SHA256:-sha256:43c61a00ef2c73416a072a7216cb3be80555d6740199f07194da2714283b04ab}"
 GOGCLI_VERSION="${GOGCLI_VERSION:-0.47.1}"
 GOGCLI_AMD64_SHA256="${GOGCLI_AMD64_SHA256:-sha256:279bc3a03c1919d774e268ef229949f45b753a0e21257f9fb315b05be7a40ea9}"
 GOGCLI_ARM64_SHA256="${GOGCLI_ARM64_SHA256:-sha256:c677ac6abf5e187e987a87fe1b588f454b002a7d7019de81b9e8db02e9e902b6}"
@@ -73,6 +78,14 @@ case "$DOCKER_PLATFORM" in
 esac
 
 LOCAL_IMAGE="${DOCKER_PLATFORM#linux/}-${MARACLAW_OPENCLAW_IMAGE:-openclaw:local}"
+
+PIN_ARGS=()
+for pin_name in GOGCLI_SKILLS_COMMIT GOGCLI_SKILLS_SHA256 CLAWSEC_COMMIT CLAWSEC_SHA256; do
+    pin_value="${!pin_name:-}"
+    if [ -n "$pin_value" ]; then
+        PIN_ARGS+=(--build-arg "$pin_name=$pin_value")
+    fi
+done
 
 ASSET_ARGS=()
 case "${OPENCLAW_ASSET_MODE:-online}" in
@@ -108,6 +121,7 @@ docker buildx build \
     --build-arg OFFICECLI_ARM64_SHA256="$OFFICECLI_ARM64_SHA256" \
     --build-arg OFFICECLI_AMD64_SHA256="$OFFICECLI_AMD64_SHA256" \
     --build-arg OFFICECLI_SKILL_SHA256="$OFFICECLI_SKILL_SHA256" \
+    ${PIN_ARGS[@]+"${PIN_ARGS[@]}"} \
     ${ASSET_ARGS[@]+"${ASSET_ARGS[@]}"} \
     -t "$LOCAL_IMAGE" \
     --load \

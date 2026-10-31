@@ -6,7 +6,7 @@
 #
 # Usage:
 #   DOCKERHUB_NAMESPACE=youruser ./publish-openclaw-local-dockerfile.sh
-#   OPENCLAW_PUBLISH_IMAGE=youruser/openclaw IMAGE_TAG=2026.10.8 ./publish-openclaw-local-dockerfile.sh
+#   OPENCLAW_PUBLISH_IMAGE=youruser/openclaw IMAGE_TAG=2026.10.9 ./publish-openclaw-local-dockerfile.sh
 #   PUSH_LATEST=1 DOCKERHUB_NAMESPACE=youruser ./publish-openclaw-local-dockerfile.sh
 #
 # Environment (set in .env or on the command line):
@@ -17,6 +17,8 @@
 #   OPENCLAW_VERSION, OPENCLAW_SHA256, GOGCLI_VERSION, GOGCLI_{AMD64,ARM64}_SHA256
 #   OFFICECLI_VERSION, OFFICECLI_{AMD64,ARM64,SKILL}_SHA256
 #                           same pins as the local build script
+#   GOGCLI_SKILLS_{COMMIT,SHA256}, CLAWSEC_{COMMIT,SHA256}
+#                           optional archive pins, forwarded only when nonempty
 #
 # Requires an existing `docker login` to Docker Hub. This script does not store credentials.
 
@@ -34,8 +36,8 @@ if [ -f "$ENV_FILE" ]; then
     set +a
 fi
 
-OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.10.8}"
-OPENCLAW_SHA256="${OPENCLAW_SHA256:-sha256:7e36685a0b5fd9c8c3afcfa93ee33fad871f7c6c8b6e695cae6720d14a765f18}"
+OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.10.9}"
+OPENCLAW_SHA256="${OPENCLAW_SHA256:-sha256:43c61a00ef2c73416a072a7216cb3be80555d6740199f07194da2714283b04ab}"
 GOGCLI_VERSION="${GOGCLI_VERSION:-0.47.1}"
 GOGCLI_AMD64_SHA256="${GOGCLI_AMD64_SHA256:-sha256:279bc3a03c1919d774e268ef229949f45b753a0e21257f9fb315b05be7a40ea9}"
 GOGCLI_ARM64_SHA256="${GOGCLI_ARM64_SHA256:-sha256:c677ac6abf5e187e987a87fe1b588f454b002a7d7019de81b9e8db02e9e902b6}"
@@ -71,6 +73,14 @@ if ! printf '%s' "$IMAGE_TAG" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]*$'; then
     echo "[openclaw-publish] ERROR: IMAGE_TAG '$IMAGE_TAG' is not a valid Docker tag" >&2
     exit 2
 fi
+
+PIN_ARGS=()
+for pin_name in GOGCLI_SKILLS_COMMIT GOGCLI_SKILLS_SHA256 CLAWSEC_COMMIT CLAWSEC_SHA256; do
+    pin_value="${!pin_name:-}"
+    if [ -n "$pin_value" ]; then
+        PIN_ARGS+=(--build-arg "$pin_name=$pin_value")
+    fi
+done
 
 ASSET_ARGS=()
 case "${OPENCLAW_ASSET_MODE:-online}" in
@@ -114,6 +124,7 @@ docker buildx build \
     --build-arg OFFICECLI_ARM64_SHA256="$OFFICECLI_ARM64_SHA256" \
     --build-arg OFFICECLI_AMD64_SHA256="$OFFICECLI_AMD64_SHA256" \
     --build-arg OFFICECLI_SKILL_SHA256="$OFFICECLI_SKILL_SHA256" \
+    ${PIN_ARGS[@]+"${PIN_ARGS[@]}"} \
     ${ASSET_ARGS[@]+"${ASSET_ARGS[@]}"} \
     "${TAGS[@]}" \
     --push \
