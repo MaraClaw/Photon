@@ -10,9 +10,7 @@ It provides:
 
 - Citation-backed answers
 
-- Deep research capabilities
-
-- Web page fetching and extraction
+- Web page fetching
 
 - Structured JSON outputs
 
@@ -50,7 +48,7 @@ curl -sS -X POST "$LINKUP_API_BASE/v1/search" \
 
 - Retrieval Augmented Generation (RAG)
 
-- Company research
+- Company lookups
 
 - Lead enrichment
 
@@ -148,7 +146,7 @@ Best when:
 
 - Lead generation
 
-- Data extraction
+- Data collection
 
 - Workflow automation
 
@@ -211,7 +209,7 @@ previous step's output.
 
 Use for:
 
-- Competitive research
+- Competitive analysis
 
 - Complex investigations
 
@@ -359,7 +357,7 @@ curl -sS -X POST "$LINKUP_API_BASE/v1/fetch" \
 
 ### Capabilities
 
-- HTML extraction
+- HTML parsing
 
 - Markdown conversion
 
@@ -367,7 +365,7 @@ curl -sS -X POST "$LINKUP_API_BASE/v1/fetch" \
 
 - PDF support
 
-- Image extraction
+- Image retrieval
 
 ### Example
 
@@ -388,56 +386,6 @@ Typical workflow:
 2. Fetch the page
 
 3. Feed content to an LLM
-
----
-
-# Research API
-
-Deep research as an API.
-
-Designed for:
-
-- Long-horizon investigations
-
-- Multi-hop research
-
-- Comprehensive reports
-
-### Endpoint
-
-```shell
-
-curl -sS -X POST "$LINKUP_API_BASE/v1/research" \
-  -H "Authorization: Bearer $LINKUP_PROXY_TOKEN" -H "Content-Type: application/json" \
-  -d '{"q":"...","mode":"research","reasoningDepth":"M","outputType":"sourcedAnswer"}'
-
-```
-
-Typical use cases:
-
-- Due diligence
-
-- Market research
-
-- Competitive analysis
-
-- Investment memos
-
-- Enterprise research agents
-
-Compared to Search:
-
-| Search | Research |
-
-|----------|----------|
-
-| Fast | Slower |
-
-| Single query | Multi-step investigation |
-
-| Simple retrieval | Deep synthesis |
-
-| Low cost | Higher cost |
 
 ---
 
@@ -543,24 +491,6 @@ LLM
 
 ---
 
-## Pattern 4: Deep Research
-
-```text
-
-Research API
-
-      ↓
-
-Multi-step Investigation
-
-      ↓
-
-Comprehensive Report
-
-```
-
----
-
 # When to Use Which Endpoint
 
 | Goal | Endpoint |
@@ -573,17 +503,11 @@ Comprehensive Report
 
 | Generate structured JSON | Search |
 
-| Extract content from a URL | Fetch |
+| Get content from a URL | Fetch |
 
 | Crawl a specific page | Fetch |
 
 | Analyze PDFs | Fetch |
-
-| Build research agents | Research |
-
-| Due diligence | Research |
-
-| Market intelligence | Research |
 
 ---
 
@@ -597,19 +521,17 @@ Comprehensive Report
 
 4. Use `fetch` when a URL is already known.
 
-5. Use `research` for complex investigations rather than chaining many search calls.
+5. Preserve citations whenever possible.
 
-6. Preserve citations whenever possible.
+6. Prefer domain filtering for high-trust workflows.
 
-7. Prefer domain filtering for high-trust workflows.
-
-8. Treat Linkup as the source of truth for real-time information, not the LLM.
+7. Treat Linkup as the source of truth for real-time information, not the LLM.
 
 ---
 
 # Mental Model
 
-Linkup provides three layers:
+Linkup provides two layers:
 
 ```text
 
@@ -619,16 +541,10 @@ Search
 
 Fetch
 
-  ↓
-
-Research
-
 ```
 
 Search finds information.
 
 Fetch retrieves information.
-
-Research investigates information.
 
 Together they give AI agents reliable access to the live web.
