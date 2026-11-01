@@ -85,8 +85,8 @@ It is strongest when the query clearly separates independent work:
 - several targeted web searches
 - adjacent keyword searches for wider news or incident coverage
 - a known URL scrape plus independent searches
-- a known LinkedIn URL extraction
-- structured extraction when the fields and schema are known
+- a known LinkedIn URL lookup
+- structured output when the fields and schema are known
 
 The query should list separate facets, entities, source families, or adjacent keywords. This helps
 Linkup run separate targeted tool calls instead of one mixed search.
@@ -101,7 +101,7 @@ Think of `deep` as search, inspect, then reuse.
 It is strongest when the query describes a dependency chain:
 
 - find the official page, then scrape it
-- find relevant LinkedIn URLs, then extract data from them
+- find relevant LinkedIn URLs, then pull data from them
 - search for likely source pages, then read the best pages
 - follow relevant links from a discovered page
 - verify a claim across multiple discovered sources
