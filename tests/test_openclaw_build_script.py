@@ -289,8 +289,8 @@ def test_openclaw_build_script_rejects_unsupported_or_multiple_platforms(tmp_pat
 @pytest.mark.parametrize(
     ("architecture", "digest"),
     [
-        ("amd64", "3c45cf49e17d07d2ce8a27e995c25c9c64e57d0c91bd776f918d683fdcb9069d"),
-        ("arm64", "de39a37d045520df746d4c5d9e5ca9f6ccc598eebd32400b194c2bb6462b12b2"),
+        ("amd64", "9b336a6647435ad6cb01107c1564e50eb867aebb14d0ca1dc04776f899b27e44"),
+        ("arm64", "552fd665f95f93fbbba5d145807667ddbf3b62fd45d555541b62eed7310cfe19"),
     ],
 )
 def test_dockerfile_selects_pinned_base_for_target_architecture(architecture: str, digest: str) -> None:
@@ -302,7 +302,7 @@ def test_dockerfile_selects_pinned_base_for_target_architecture(architecture: st
     argument = f"OPENCLAW_BASE_IMAGE_{architecture.upper()}"
 
     # Then
-    assert f"ARG {argument}=nikolaik/python-nodejs@sha256:{digest}" in lines
+    assert f"ARG {argument}=nikolaik/python-nodejs:python3.15-nodejs26-slim@sha256:{digest}" in lines
     assert f"FROM ${{{argument}}} AS base_{architecture}" in lines
     assert "FROM base_${TARGETARCH}" in lines
 

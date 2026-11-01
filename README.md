@@ -58,7 +58,7 @@ Alternatively set `OPENCLAW_PUBLISH_IMAGE`; `IMAGE_TAG` defaults to `OPENCLAW_VE
 
 ## Test
 
-With Python 3.14.8 and uv installed, run the standalone suite without Docker or other services:
+With Python 3.15.2 and uv installed, run the standalone suite without Docker or other services:
 
 ```bash
 uv run --extra dev pytest
@@ -72,7 +72,7 @@ git config core.hooksPath .githooks
 
 The tests must pass for the push to proceed.
 
-The real dual-architecture Docker integration smoke is opt-in. It needs Docker buildx, network access, both target execution environments, and host Node `v26.12.1`:
+The real dual-architecture Docker integration smoke is opt-in. It needs Docker buildx, network access, both target execution environments, and host Node `v26.13.0`:
 
 ```bash
 RUN_OPENCLAW_OFFICECLI_SMOKE=1 uv run --extra dev pytest tests/test_openclaw_officecli_container_smoke.py

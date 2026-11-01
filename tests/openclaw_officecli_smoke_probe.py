@@ -29,7 +29,7 @@ test "$(id -u)" -ne 0
 test -w "$OPENCLAW_STATE_DIR"
 test -f "$GOG_KEYRING_PASSWORD_FILE" && test -n "$GOG_KEYRING_PASSWORD"
 test "$GOG_KEYRING_PASSWORD" = "$(cat "$GOG_KEYRING_PASSWORD_FILE")"
-test "$(node --version)" = "v26.12.1"
+test "$(node --version)" = "v26.13.0"
 test "$(node -p 'process.arch')" = "$EXPECTED_NODE_ARCH"
 printf 'executed node=%s arch=%s kernel=%s\n' "$(node --version)" "$(node -p 'process.arch')" "$(uname -m)"
 gog --version | grep '0.47.1'

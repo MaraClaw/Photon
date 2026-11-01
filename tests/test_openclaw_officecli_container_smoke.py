@@ -28,7 +28,7 @@ def smoke_workspace() -> Iterator[SmokeWorkspace]:
     if os.environ.get("RUN_OPENCLAW_OFFICECLI_SMOKE") != "1":
         pytest.skip("set RUN_OPENCLAW_OFFICECLI_SMOKE=1 to execute both real Docker guest targets")
     host_node = subprocess.run(("node", "--version"), capture_output=True, text=True, check=True, timeout=1200)
-    assert host_node.stdout.strip() == "v26.12.1"
+    assert host_node.stdout.strip() == "v26.13.0"
     docker.version()
     workspace = create_workspace()
     try:
