@@ -21,14 +21,14 @@ INTEGRITY_HELPERS = ("startup-probe.sh", "startup-probe.py", "installed-assets.p
 def prepare_integrity(root: Path, skills: Path, env: dict[str, str], script: Path) -> Path:
     root = root.resolve()
     skills = skills.resolve()
-    env["NPM_ROOT"] = str(skills.parent.parent)
+    env["HOME"] = str(skills.parent.parent)
     binaries = root / "integrity-binaries"
     binaries.mkdir(exist_ok=True)
     for name in ("gog", "officecli"):
         binary = binaries / name
         if not binary.exists():
             binary.write_text("fixture\n")
-    for name in ("gog", "crabbox", "officecli", "soul-guardian", "linkup-search", "linkup-fetch"):
+    for name in ("gog", "crabbox", "officecli", "soul-guardian", "linkup-search", "linkup-fetch", "humanizer"):
         directory = skills / name
         directory.mkdir(parents=True, exist_ok=True)
         if not any(directory.iterdir()):

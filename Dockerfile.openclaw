@@ -9,8 +9,8 @@ SHELL ["/bin/sh", "-c"]
 ARG TARGETOS
 ARG TARGETARCH
 ARG OPENCLAW_ASSET_MODE=online
-ARG OPENCLAW_VERSION=2026.10.9
-ARG OPENCLAW_SHA256=sha256:43c61a00ef2c73416a072a7216cb3be80555d6740199f07194da2714283b04ab
+ARG OPENCLAW_VERSION=2026.10.10
+ARG OPENCLAW_SHA256=sha256:e811c18281812a409e29a681ada7faf7100560020e144fbdf18889fab2c7cf06
 ARG TINI_VERSION=0.19.0-3+b8
 ARG CA_CERTIFICATES_VERSION=20250419+deb13u1
 ARG CURL_VERSION=8.14.1-2+deb13u7
@@ -20,14 +20,16 @@ ARG LIBICU76_VERSION=76.1-4
 ARG GOGCLI_VERSION=0.47.1
 ARG GOGCLI_AMD64_SHA256=sha256:279bc3a03c1919d774e268ef229949f45b753a0e21257f9fb315b05be7a40ea9
 ARG GOGCLI_ARM64_SHA256=sha256:c677ac6abf5e187e987a87fe1b588f454b002a7d7019de81b9e8db02e9e902b6
-ARG OFFICECLI_VERSION=v1.0.159
-ARG OFFICECLI_ARM64_SHA256=a27778548f2820771f54a70887af3c3ec214fe60e63b32836b09b3f3e2c4c493
-ARG OFFICECLI_AMD64_SHA256=92d9aeed324d91ed2a107f7f8dc7468829b14390a66cf2bbdfb25c40beac50ea
+ARG OFFICECLI_VERSION=v1.0.160
+ARG OFFICECLI_ARM64_SHA256=e8f06aff6c59f11a73a1a1218bda3ce170299201fd56bce6d62ecd4d0c024e53
+ARG OFFICECLI_AMD64_SHA256=baa084b64ec634bd9d41a0592db3ed85f11658b358bab898679537ea7f3e73a9
 ARG OFFICECLI_SKILL_SHA256=c950d285ce60021712b4753fb2d9f592308d5622bab776229061dfecb1ce55d4
 ARG GOGCLI_SKILLS_COMMIT
 ARG GOGCLI_SKILLS_SHA256
 ARG CLAWSEC_COMMIT
 ARG CLAWSEC_SHA256
+ARG HUMANIZER_COMMIT
+ARG HUMANIZER_SHA256
 
 USER root
 RUN apt-get update \
@@ -51,6 +53,9 @@ RUN apt-get update \
 
 RUN groupmod -n node pn \
     && usermod -l node -d /home/node -m pn
+
+ENV HOME=/home/node
+RUN install -d -o node -g node -m 0755 "$HOME/.openclaw"
 
 RUN --mount=type=bind,from=openclaw_assets,target=/staged case "$TARGETOS/$TARGETARCH" in \
         linux/amd64) GOGCLI_SHA256="$GOGCLI_AMD64_SHA256" ;; \
@@ -97,12 +102,19 @@ RUN --mount=type=bind,from=openclaw_assets,target=/staged \
         staged) sh /tmp/install-soul-guardian.sh --archive-file /staged/common/soul-guardian.tar.gz ;; \
         *) exit 2 ;; \
     esac && rm /tmp/install-soul-guardian.sh
+COPY docker/openclaw/install-humanizer.sh /tmp/install-humanizer.sh
+RUN --mount=type=bind,from=openclaw_assets,target=/staged \
+    case "$OPENCLAW_ASSET_MODE" in \
+        online) sh /tmp/install-humanizer.sh ;; \
+        staged) sh /tmp/install-humanizer.sh --archive-file /staged/common/humanizer.tar.gz ;; \
+        *) exit 2 ;; \
+    esac && rm /tmp/install-humanizer.sh
 COPY docker/openclaw/linkup-skills/ /tmp/linkup-skills/
 COPY docker/openclaw/install-linkup.sh /tmp/install-linkup.sh
 RUN sh /tmp/install-linkup.sh && rm /tmp/install-linkup.sh
 COPY docker/openclaw/installed-assets.py /usr/local/bin/installed-assets.py
 RUN python3 /usr/local/bin/installed-assets.py create \
-    --skills-root "$(npm root -g)/openclaw/skills" \
+    --skills-root "$HOME/.openclaw/skills" \
     --gog-roots-file /usr/local/share/openclaw-integrity/gog-skill-roots.txt \
     --output-dir /usr/local/share/openclaw-integrity
 COPY docker/openclaw/validate-gogcli.sh /usr/local/bin/validate-gogcli.sh
@@ -110,12 +122,13 @@ RUN chmod 0755 /usr/local/bin/validate-gogcli.sh
 COPY docker/openclaw/validate-officecli.sh /usr/local/bin/validate-officecli.sh
 COPY docker/openclaw/validate-soul-guardian.sh /usr/local/bin/validate-soul-guardian.sh
 COPY docker/openclaw/validate-linkup.sh /usr/local/bin/validate-linkup.sh
+COPY docker/openclaw/validate-humanizer.sh /usr/local/bin/validate-humanizer.sh
 COPY docker/openclaw/startup-probe.sh /usr/local/bin/startup-probe.sh
 COPY docker/openclaw/startup-probe.py /usr/local/bin/startup-probe.py
 COPY docker/openclaw/bootstrap_event.py /usr/local/bin/bootstrap_event.py
 COPY docker/openclaw/bootstrap-agent-container.py /usr/local/bin/bootstrap-agent-container.py
-RUN chmod 0755 /usr/local/bin/validate-officecli.sh /usr/local/bin/validate-soul-guardian.sh /usr/local/bin/validate-linkup.sh /usr/local/bin/startup-probe.sh /usr/local/bin/startup-probe.py /usr/local/bin/bootstrap_event.py /usr/local/bin/bootstrap-agent-container.py
+RUN chmod 0755 /usr/local/bin/validate-officecli.sh /usr/local/bin/validate-soul-guardian.sh /usr/local/bin/validate-linkup.sh /usr/local/bin/validate-humanizer.sh /usr/local/bin/startup-probe.sh /usr/local/bin/startup-probe.py /usr/local/bin/bootstrap_event.py /usr/local/bin/bootstrap-agent-container.py
 
 USER node
-ENTRYPOINT ["tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh", "/usr/local/bin/validate-officecli.sh", "/usr/local/bin/validate-soul-guardian.sh", "/usr/local/bin/validate-linkup.sh", "/usr/local/bin/bootstrap-agent-container.py"]
+ENTRYPOINT ["tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh", "/usr/local/bin/validate-officecli.sh", "/usr/local/bin/validate-soul-guardian.sh", "/usr/local/bin/validate-linkup.sh", "/usr/local/bin/validate-humanizer.sh", "/usr/local/bin/bootstrap-agent-container.py"]
 CMD ["openclaw", "gateway"]

@@ -16,7 +16,7 @@ esac
 probe_dir=${validator_path%/*}
 . "$probe_dir/startup-probe.sh"
 
-if ! probe_run python3 -B "$probe_dir/installed-assets.py" verify --component gogcli --inventory-dir /usr/local/share/openclaw-integrity; then
+if ! probe_run python3 -B "$probe_dir/installed-assets.py" verify --component gogcli --inventory-dir /usr/local/share/openclaw-integrity --skills-root "$HOME/.openclaw/skills"; then
     printf '%s\n' 'Installed assets failed verification: gogcli' >&2
     exit 1
 fi
@@ -26,18 +26,7 @@ if ! probe_run "/usr/local/bin/gog" --version; then
     exit 1
 fi
 
-if ! probe_capture npm root -g || [ -z "$probe_output" ]; then
-    printf '%s\n' 'Required skill failed verification: gog' >&2
-    exit 1
-fi
-npm_root=$probe_output
-
-if ! probe_run python3 -B "$probe_dir/installed-assets.py" verify --component gogcli --inventory-dir /usr/local/share/openclaw-integrity --skills-root "$npm_root/openclaw/skills"; then
-    printf '%s\n' 'Required skill failed verification: gog' >&2
-    exit 1
-fi
-
-skill_dir="$npm_root/openclaw/skills/gog"
+skill_dir="$HOME/.openclaw/skills/gog"
 if [ ! -f "$skill_dir/SKILL.md" ] || [ ! -r "$skill_dir/SKILL.md" ] || [ ! -s "$skill_dir/SKILL.md" ]; then
     printf '%s\n' 'Required skill failed verification: gog' >&2
     exit 1

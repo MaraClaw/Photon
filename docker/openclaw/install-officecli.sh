@@ -1,9 +1,9 @@
 #!/bin/sh
 set -eu
 
-OFFICECLI_VERSION="${OFFICECLI_VERSION:-v1.0.159}"
-OFFICECLI_ARM64_SHA256="${OFFICECLI_ARM64_SHA256:-a27778548f2820771f54a70887af3c3ec214fe60e63b32836b09b3f3e2c4c493}"
-OFFICECLI_AMD64_SHA256="${OFFICECLI_AMD64_SHA256:-92d9aeed324d91ed2a107f7f8dc7468829b14390a66cf2bbdfb25c40beac50ea}"
+OFFICECLI_VERSION="${OFFICECLI_VERSION:-v1.0.160}"
+OFFICECLI_ARM64_SHA256="${OFFICECLI_ARM64_SHA256:-e8f06aff6c59f11a73a1a1218bda3ce170299201fd56bce6d62ecd4d0c024e53}"
+OFFICECLI_AMD64_SHA256="${OFFICECLI_AMD64_SHA256:-baa084b64ec634bd9d41a0592db3ed85f11658b358bab898679537ea7f3e73a9}"
 OFFICECLI_SKILL_SHA256="${OFFICECLI_SKILL_SHA256:-c950d285ce60021712b4753fb2d9f592308d5622bab776229061dfecb1ce55d4}"
 readonly OFFICECLI_VERSION OFFICECLI_ARM64_SHA256 OFFICECLI_AMD64_SHA256 OFFICECLI_SKILL_SHA256
 
@@ -86,7 +86,7 @@ printf '%s  %s\n%s  %s\n' "${digest#sha256:}" "$stage/officecli" "${OFFICECLI_SK
 install -d -m 0755 "$stage/payload/skill" "$stage/backup"
 install -m 0755 "$stage/officecli" "$stage/payload/officecli"
 install -m 0644 "$stage/SKILL.md" "$stage/payload/skill/SKILL.md"
-skill_destination="$(npm root -g)/openclaw/skills/officecli"
+skill_destination="$HOME/.openclaw/skills/officecli"
 if [ -e "$binary_destination" ] || [ -L "$binary_destination" ]; then
     cp -a -- "$binary_destination" "$stage/backup/officecli"
     binary_saved=1

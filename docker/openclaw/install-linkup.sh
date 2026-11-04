@@ -69,7 +69,7 @@ for directory, directories, files in os.walk(root, followlinks=False):
             except (OSError, RuntimeError, ValueError):
                 sys.exit(f"invalid Linkup payload symlink: {path}")
 PY
-destination="$(npm root -g)/openclaw/skills"
+destination="$HOME/.openclaw/skills"
 install -d -m 0755 "$destination"
 while IFS= read -r name; do
     if [ -e "$destination/$name" ] || [ -L "$destination/$name" ]; then

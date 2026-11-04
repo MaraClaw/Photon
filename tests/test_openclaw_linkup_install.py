@@ -22,9 +22,9 @@ def linkup_fixture(tmp_path: Path) -> tuple[Path, dict[str, str], Path, Path]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     npm = bin_dir / "npm"
-    npm.write_text('#!/bin/sh\nprintf "%s\\n" "$NPM_ROOT"\n')
+    npm.write_text('#!/bin/sh\nexit 99\n')
     npm.chmod(0o755)
-    skills = tmp_path / "npm root/openclaw/skills"
+    skills = tmp_path / "npm root/.openclaw/skills"
     for name in ("linkup-search", "linkup-fetch", "linkup-custom"):
         (skills / name).mkdir(parents=True)
         (skills / name / "old").write_text(name)
@@ -32,7 +32,7 @@ def linkup_fixture(tmp_path: Path) -> tuple[Path, dict[str, str], Path, Path]:
     (skills / "linkup-search/old").chmod(0o640)
     stages = tmp_path / "stages"
     stages.mkdir()
-    env = os.environ | {"PATH": f'{bin_dir}:{os.environ["PATH"]}', "NPM_ROOT": str(tmp_path / "npm root"), "TMPDIR": str(stages)}
+    env = os.environ | {"PATH": f'{bin_dir}:{os.environ["PATH"]}', "NPM_ROOT": str(tmp_path / "npm root"), "HOME": str(tmp_path / "npm root"), "TMPDIR": str(stages)}
     return script, env, source, skills
 
 

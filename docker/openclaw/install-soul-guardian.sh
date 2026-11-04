@@ -60,7 +60,7 @@ cp -a -- "$source/skills/soul-guardian" "$stage/incoming"
 rm -f -- "$stage/incoming/LICENSE"
 cp -- "$source/LICENSE" "$stage/incoming/LICENSE"
 chmod -R a+rX "$stage/incoming"
-destination="$(npm root -g)/openclaw/skills"
+destination="$HOME/.openclaw/skills"
 install -d -m 0755 "$destination"
 if [ -e "$destination/soul-guardian" ] || [ -L "$destination/soul-guardian" ]; then
     cp -a -- "$destination/soul-guardian" "$stage/backup"

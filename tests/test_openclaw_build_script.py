@@ -10,18 +10,18 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 BUILD_SCRIPT = REPO_ROOT / "build-openclaw-local-dockerfile.sh"
 DOCKERFILE = REPO_ROOT / "Dockerfile.openclaw"
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
-OPENCLAW_VERSION = "2026.10.9"
-OPENCLAW_SHA256 = "sha256:43c61a00ef2c73416a072a7216cb3be80555d6740199f07194da2714283b04ab"
+OPENCLAW_VERSION = "2026.10.10"
+OPENCLAW_SHA256 = "sha256:e811c18281812a409e29a681ada7faf7100560020e144fbdf18889fab2c7cf06"
 GOGCLI_VERSION = "0.47.1"
 GOGCLI_ARM64_SHA256 = "sha256:c677ac6abf5e187e987a87fe1b588f454b002a7d7019de81b9e8db02e9e902b6"
 GOGCLI_AMD64_SHA256 = "sha256:279bc3a03c1919d774e268ef229949f45b753a0e21257f9fb315b05be7a40ea9"
 OFFICECLI_PINS = {
-    "OFFICECLI_VERSION": "v1.0.159",
-    "OFFICECLI_ARM64_SHA256": "a27778548f2820771f54a70887af3c3ec214fe60e63b32836b09b3f3e2c4c493",
-    "OFFICECLI_AMD64_SHA256": "92d9aeed324d91ed2a107f7f8dc7468829b14390a66cf2bbdfb25c40beac50ea",
+    "OFFICECLI_VERSION": "v1.0.160",
+    "OFFICECLI_ARM64_SHA256": "e8f06aff6c59f11a73a1a1218bda3ce170299201fd56bce6d62ecd4d0c024e53",
+    "OFFICECLI_AMD64_SHA256": "baa084b64ec634bd9d41a0592db3ed85f11658b358bab898679537ea7f3e73a9",
     "OFFICECLI_SKILL_SHA256": "c950d285ce60021712b4753fb2d9f592308d5622bab776229061dfecb1ce55d4",
 }
-ARCHIVE_PIN_NAMES = ("GOGCLI_SKILLS_COMMIT", "GOGCLI_SKILLS_SHA256", "CLAWSEC_COMMIT", "CLAWSEC_SHA256")
+ARCHIVE_PIN_NAMES = ("GOGCLI_SKILLS_COMMIT", "GOGCLI_SKILLS_SHA256", "CLAWSEC_COMMIT", "CLAWSEC_SHA256", "HUMANIZER_COMMIT", "HUMANIZER_SHA256")
 
 
 def read_docker_argv(log_path: Path) -> list[str]:
@@ -385,7 +385,7 @@ def test_staged_local_build_passes_one_named_context_with_spaces(tmp_path: Path,
     bin_dir, log_path = install_fake_docker(tmp_path)
     assets = tmp_path / "assets with spaces"
     for name in (f"linux-{architecture}/gogcli.tar.gz", f"linux-{architecture}/officecli",
-                 "common/officecli-SKILL.md", "common/gogcli-skills.tar.gz", "common/soul-guardian.tar.gz"):
+                 "common/officecli-SKILL.md", "common/gogcli-skills.tar.gz", "common/soul-guardian.tar.gz", "common/humanizer.tar.gz"):
         path = assets / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
@@ -415,7 +415,7 @@ def test_staged_local_build_keeps_staged_arguments_with_archive_pins(tmp_path: P
     bin_dir, log_path = install_fake_docker(tmp_path)
     assets = tmp_path / "assets with spaces"
     for name in (f"linux-{architecture}/gogcli.tar.gz", f"linux-{architecture}/officecli",
-                 "common/officecli-SKILL.md", "common/gogcli-skills.tar.gz", "common/soul-guardian.tar.gz"):
+                 "common/officecli-SKILL.md", "common/gogcli-skills.tar.gz", "common/soul-guardian.tar.gz", "common/humanizer.tar.gz"):
         path = assets / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()

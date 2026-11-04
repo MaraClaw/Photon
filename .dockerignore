@@ -5,11 +5,13 @@
 !docker/openclaw/install-officecli.sh
 !docker/openclaw/install-gogcli-skills.sh
 !docker/openclaw/install-soul-guardian.sh
+!docker/openclaw/install-humanizer.sh
 !docker/openclaw/install-linkup.sh
 !docker/openclaw/validate-gogcli.sh
 !docker/openclaw/validate-officecli.sh
 !docker/openclaw/validate-soul-guardian.sh
 !docker/openclaw/validate-linkup.sh
+!docker/openclaw/validate-humanizer.sh
 !docker/openclaw/startup-probe.sh
 !docker/openclaw/startup-probe.py
 !docker/openclaw/bootstrap_event.py

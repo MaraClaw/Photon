@@ -70,7 +70,7 @@ fi
 printf '%s  %s\n' "$GOGCLI_SKILLS_SHA256" "$stage/gogcli.tar.gz" | sha256sum -c -
 tar -xzf "$stage/gogcli.tar.gz" -C "$stage"
 source="$stage/gogcli-$GOGCLI_SKILLS_COMMIT/.agents/skills"
-destination="$(npm root -g)/openclaw/skills"
+destination="$HOME/.openclaw/skills"
 mkdir "$stage/prepared" "$stage/backup" "$stage/journal"
 : > "$stage/ownership"
 for skill in "$source"/*; do

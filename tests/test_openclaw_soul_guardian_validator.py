@@ -29,7 +29,7 @@ def test_guardian_slashless_script_lookup(guardian: tuple[Path, dict[str, str]],
 
 @pytest.fixture
 def guardian(tmp_path: Path) -> tuple[Path, dict[str, str]]:
-    skill = tmp_path / "npm root with spaces/openclaw/skills/soul-guardian"
+    skill = tmp_path / "home/.openclaw/skills/soul-guardian"
     (skill / "scripts").mkdir(parents=True)
     for asset in ASSETS:
         (skill / asset).write_text("fixture\n")
@@ -48,11 +48,10 @@ def guardian(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     npm = bin_dir / "npm"
-    npm.write_text('#!/bin/sh\n[ "$*" = "root -g" ] || exit 2\n[ "${NPM_FAIL:-}" != 1 ] || { printf "secret diagnostic\\n" >&2; exit 3; }\nprintf "%s\\n" "$NPM_ROOT"\n')
+    npm.write_text('#!/bin/sh\nexit 99\n')
     npm.chmod(0o755)
     (bin_dir / "python3").symlink_to(sys.executable)
     home = tmp_path / "home"
-    home.mkdir()
     env = os.environ | {
         "PATH": f'{bin_dir}:{os.environ["PATH"]}',
         "HOME": str(home),
@@ -86,7 +85,7 @@ def test_exec_preserves_arguments_environment_and_status_when_skill_is_valid(
     assert result.returncode == exit_code
     assert json.loads(Path(env["CHILD_LOG"]).read_text()) == [arguments, "environment value"]
     assert result.stdout == result.stderr == ""
-    assert not list(Path(env["HOME"]).iterdir())
+    assert not (Path(env["HOME"]) / "guardian-state").exists()
     assert not list(skill.rglob("__pycache__"))
     assert not list(skill.rglob("*.pyc"))
 
@@ -114,18 +113,16 @@ def test_invalid_asset_blocks_child(guardian: tuple[Path, dict[str, str]], asset
     assert result.stdout == ""
     assert result.stderr == "Required skill failed verification: soul-guardian\n"
     assert not Path(env["CHILD_LOG"]).exists()
-    assert not list(Path(env["HOME"]).iterdir())
+    assert not (Path(env["HOME"]) / "guardian-state").exists()
 
 
-@pytest.mark.parametrize("failure", ["npm-failure", "empty-root", "broken-python", "malformed-json", "broken-onboarding"])
+@pytest.mark.parametrize("failure", ["home-redirect", "broken-python", "malformed-json", "broken-onboarding"])
 def test_probe_or_discovery_failure_blocks_child(guardian: tuple[Path, dict[str, str]], failure: str) -> None:
     skill, env = guardian
     if failure == "broken-python":
         (skill / "scripts/soul_guardian.py").write_text('raise RuntimeError("secret diagnostic")\n')
-    if failure == "npm-failure":
-        env["NPM_FAIL"] = "1"
-    if failure == "empty-root":
-        env["NPM_ROOT"] = ""
+    if failure == "home-redirect":
+        env["HOME"] = str(skill.parents[3] / "other-home")
     if failure == "malformed-json":
         (skill / "skill.json").write_text("{broken\n")
     if failure == "broken-onboarding":
@@ -140,18 +137,18 @@ def test_probe_or_discovery_failure_blocks_child(guardian: tuple[Path, dict[str,
     assert result.stdout == ""
     assert result.stderr == "Required skill failed verification: soul-guardian\n"
     assert not Path(env["CHILD_LOG"]).exists()
-    assert not list(Path(env["HOME"]).iterdir())
+    assert not (Path(env["HOME"]) / "guardian-state").exists()
     assert not list(skill.rglob("__pycache__"))
     assert not list(skill.rglob("*.pyc"))
 
 
-@pytest.mark.parametrize("probe", ["npm", "compile", "help"])
+@pytest.mark.parametrize("probe", ["compile", "help"])
 def test_guardian_hanging_probe_times_out(guardian: tuple[Path, dict[str, str]], probe: str) -> None:
     skill, env = guardian
     root = Path(env["HOME"]).parent
-    install_hang(root, env, root / "bin" / ("npm" if probe == "npm" else "python3"), python_probe="" if probe == "npm" else probe)
+    install_hang(root, env, root / "bin/python3", python_probe=probe)
     exercise_timeout(Path(env["VALIDATOR"]), env)
-    assert not list(Path(env["HOME"]).iterdir())
+    assert not (Path(env["HOME"]) / "guardian-state").exists()
     assert not list(skill.rglob("__pycache__"))
 
 
@@ -160,7 +157,7 @@ def test_guardian_hanging_probe_times_out(guardian: tuple[Path, dict[str, str]],
 def test_invalid_policy_prevents_guardian_probes(guardian: tuple[Path, dict[str, str]], key: str, value: str) -> None:
     _, env = guardian
     root = Path(env["HOME"]).parent
-    install_hang(root, env, root / "bin/npm")
+    install_hang(root, env, root / "bin/python3", python_probe="compile")
     exercise_invalid_policy(Path(env["VALIDATOR"]), env, key, value)
 
 
@@ -177,7 +174,7 @@ def test_guardian_restart_rechecks_hanging_probe(guardian: tuple[Path, dict[str,
     root = Path(env["HOME"]).parent
     assert subprocess.run(["/bin/sh", env["VALIDATOR"], "/bin/sh", "-c", ":"], env=env, timeout=5, check=False).returncode == 0
     (Path(env["HOME"]) / ".guardian-checked").touch()
-    install_hang(root, env, root / "bin/npm")
+    install_hang(root, env, root / "bin/python3", python_probe="compile")
     exercise_timeout(Path(env["VALIDATOR"]), env)
 
 

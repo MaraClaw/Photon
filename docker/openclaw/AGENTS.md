@@ -5,7 +5,7 @@ Guest **OpenClaw agent image** helpers. Not the FastAPI API. Image contract also
 ## Chain
 
 ```
-tini -s -- validate-gogcli.sh validate-officecli.sh validate-soul-guardian.sh validate-linkup.sh bootstrap-agent-container.py openclaw gateway
+tini -s -- validate-gogcli.sh validate-officecli.sh validate-soul-guardian.sh validate-linkup.sh validate-humanizer.sh bootstrap-agent-container.py openclaw gateway
 USER: node
 ```
 
@@ -13,15 +13,17 @@ USER: node
 |---|---|---|
 | `install-officecli.sh` | image build | Download pinned target binary and skill, verify both SHA256 digests, and install them into the image |
 | `install-linkup.sh` | image build | Install the bundled Linkup skills offline into the OpenClaw skills directory |
+| `install-humanizer.sh` | image build | Install the pinned Humanizer skill and upstream license from an online or staged archive |
 | `validate-gogcli.sh` | entrypoint | Verify gog, optionally load `GOG_KEYRING_PASSWORD_FILE`, and exec the supplied command unchanged |
 | `validate-officecli.sh` | entrypoint | Verify OfficeCLI and exec the supplied command unchanged |
 | `validate-soul-guardian.sh` | entrypoint | Verify the skill assets and non-mutating help probe, then exec the supplied command unchanged |
 | `validate-linkup.sh` | entrypoint | Verify the two bundled Linkup skills and references offline, then exec the supplied command unchanged |
+| `validate-humanizer.sh` | entrypoint | Verify the Humanizer skill offline, then exec the supplied command unchanged |
 | `bootstrap-agent-container.py` | entrypoint (last), `docker exec` | Publish and enforce `AgentBootstrapCompleted` (see below); imports `bootstrap_event.py`, which owns the guest identity and the event file |
 
 ## Bootstrap event
 
-`bootstrap-agent-container.py` runs after all four validators. Any command except the long-running `openclaw gateway [run] [--options]` (so also `openclaw gateway status`) is exec'd unchanged and emits nothing. For the gateway it launches one child, waits for the real loopback `/readyz` (port from `--port`, else `OPENCLAW_GATEWAY_PORT`, else 18789, as OpenClaw itself resolves it, so set the env var if `gateway.port` in `openclaw.json` differs; budget `OPENCLAW_BOOTSTRAP_TIMEOUT_SECONDS`, default 120), confirms the child is still alive, then atomically publishes `/tmp/maraclaw-bootstrap/AgentBootstrapCompleted.json`: `{"version":1,"event":"AgentBootstrapCompleted","boot_id":<kernel boot id>,"pid1_start_ticks":"<PID 1 /proc stat field 22>"}`. It then relays signals and exits with the child's status. Early exit, timeout (124) or HUP/INT/QUIT/TERM before readiness publish nothing and leave no child.
+`bootstrap-agent-container.py` runs after all five validators. Any command except the long-running `openclaw gateway [run] [--options]` (so also `openclaw gateway status`) is exec'd unchanged and emits nothing. For the gateway it launches one child, waits for the real loopback `/readyz` (port from `--port`, else `OPENCLAW_GATEWAY_PORT`, else 18789, as OpenClaw itself resolves it, so set the env var if `gateway.port` in `openclaw.json` differs; budget `OPENCLAW_BOOTSTRAP_TIMEOUT_SECONDS`, default 120), confirms the child is still alive, then atomically publishes `/tmp/maraclaw-bootstrap/AgentBootstrapCompleted.json`: `{"version":1,"event":"AgentBootstrapCompleted","boot_id":<kernel boot id>,"pid1_start_ticks":"<PID 1 /proc stat field 22>"}`. It then relays signals and exits with the child's status. Early exit, timeout (124) or HUP/INT/QUIT/TERM before readiness publish nothing and leave no child.
 
 The event is valid only while both identity values match the running guest, so a file left by an earlier boot or container start never authorizes this one; removal is hygiene, not the guard. `check-ready` validates the event and then probes `/readyz` (0 ready, 1 not ready); `exec -- ACTION...` validates it and then execs the action. Both exit 75 while bootstrap is pending (missing, malformed, unsupported or mismatched event) and nothing is cached.
 
@@ -35,6 +37,7 @@ The engine and the image are a matched pair: an image built without this helper 
 - OfficeCLI and its skill are baked into the image; startup never downloads them or changes OpenClaw state or configuration.
 - Soul Guardian is baked into the image; startup validates it without initializing state or enabling monitoring.
 - Linkup skills are installed from `linkup-skills/` at build time; startup validates them offline without credentials.
+- Humanizer is installed at build time with installer-owned archive pins; startup validates it offline.
 - OpenClaw is installed from its checksum-verified pinned npm archive without local memory-provider patches.
 
 ## Avoid

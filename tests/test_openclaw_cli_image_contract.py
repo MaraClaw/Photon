@@ -45,12 +45,12 @@ def test_archive_pin_arguments_are_final_stage_defaultless_and_not_runtime_env()
         if instruction == "ENV":
             runtime_env.update(token.partition("=")[0] for token in shlex.split(body))
         if instruction == "RUN":
-            for installer in ("install-gogcli-skills", "install-soul-guardian"):
+            for installer in ("install-gogcli-skills", "install-soul-guardian", "install-humanizer"):
                 if f"sh /tmp/{installer}.sh" in body:
                     installer_args[installer] = stage_args.copy()
     assert stage_count == 4
     assert not global_args.intersection(ARCHIVE_PIN_NAMES)
-    assert set(installer_args) == {"install-gogcli-skills", "install-soul-guardian"}
+    assert set(installer_args) == {"install-gogcli-skills", "install-soul-guardian", "install-humanizer"}
     for declared in installer_args.values():
         for name in ARCHIVE_PIN_NAMES:
             assert declared.count(name) == 1
@@ -65,7 +65,7 @@ def test_image_installs_pinned_cli_and_runs_validator_as_entrypoint() -> None:
     assert json.loads(entrypoint.removeprefix("ENTRYPOINT ")) == [
         "tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh",
         "/usr/local/bin/validate-officecli.sh", "/usr/local/bin/validate-soul-guardian.sh",
-        "/usr/local/bin/validate-linkup.sh", "/usr/local/bin/bootstrap-agent-container.py",
+        "/usr/local/bin/validate-linkup.sh", "/usr/local/bin/validate-humanizer.sh", "/usr/local/bin/bootstrap-agent-container.py",
     ]
     assert json.loads(command.removeprefix("CMD ")) == ["openclaw", "gateway"]
     assert "COPY docker/openclaw/install-officecli.sh /tmp/install-officecli.sh" in lines
@@ -73,11 +73,11 @@ def test_image_installs_pinned_cli_and_runs_validator_as_entrypoint() -> None:
     assert 'staged) sh /tmp/install-officecli.sh --binary-file "/staged/linux-${TARGETARCH}/officecli" --skill-file /staged/common/officecli-SKILL.md ;;' in source
     assert "COPY docker/openclaw/validate-gogcli.sh /usr/local/bin/validate-gogcli.sh" in lines
     assert "RUN chmod 0755 /usr/local/bin/validate-gogcli.sh" in lines
-    for name in ("officecli", "soul-guardian", "linkup"):
+    for name in ("officecli", "soul-guardian", "linkup", "humanizer"):
         assert f"COPY docker/openclaw/validate-{name}.sh /usr/local/bin/validate-{name}.sh" in lines
         assert f"!docker/openclaw/validate-{name}.sh" in (DOCKERFILE.parent / ".dockerignore").read_text().splitlines()
     chmod = next(line for line in lines if line.startswith("RUN chmod 0755 /usr/local/bin/validate-officecli.sh"))
-    assert {f"/usr/local/bin/validate-{name}.sh" for name in ("officecli", "soul-guardian", "linkup")} <= set(shlex.split(chmod))
+    assert {f"/usr/local/bin/validate-{name}.sh" for name in ("officecli", "soul-guardian", "linkup", "humanizer")} <= set(shlex.split(chmod))
     assert "COPY docker/openclaw/linkup-skills/ /tmp/linkup-skills/" in lines
     assert "COPY docker/openclaw/install-linkup.sh /tmp/install-linkup.sh" in lines
     assert "RUN sh /tmp/install-linkup.sh && rm /tmp/install-linkup.sh" in lines
@@ -86,7 +86,7 @@ def test_image_installs_pinned_cli_and_runs_validator_as_entrypoint() -> None:
     assert '!docker/openclaw/linkup-skills/**' in (DOCKERFILE.parent / '.dockerignore').read_text().splitlines()
     installer = (DOCKERFILE.parent / 'docker/openclaw/install-linkup.sh').read_text()
     assert installer.startswith('#!/bin/sh\nset -eu\n')
-    assert 'destination="$(npm root -g)/openclaw/skills"' in installer
+    assert 'destination="$HOME/.openclaw/skills"' in installer
     assert 'install -d -m 0755 "$destination"' in installer
     assert 'source=/tmp/linkup-skills' in installer
     assert '"$source/manifest.json"' in installer
@@ -134,7 +134,9 @@ def test_image_inventory_is_created_after_installers_before_node() -> None:
     assert "COPY docker/openclaw/installed-assets.py /usr/local/bin/installed-assets.py" in source
     inventory = source.index("RUN python3 /usr/local/bin/installed-assets.py create")
     assert source.index("RUN sh /tmp/install-linkup.sh") < inventory < source.index("USER node")
-    assert '--skills-root "$(npm root -g)/openclaw/skills"' in source[inventory:]
+    assert source.index("sh /tmp/install-humanizer.sh") < inventory
+    assert "!docker/openclaw/install-humanizer.sh" in allowed
+    assert '--skills-root "$HOME/.openclaw/skills"' in source[inventory:]
     assert "--gog-roots-file /usr/local/share/openclaw-integrity/gog-skill-roots.txt" in source[inventory:]
     assert "--output-dir /usr/local/share/openclaw-integrity" in source[inventory:]
 
@@ -143,9 +145,10 @@ def test_staged_assets_are_bind_mounted_and_use_pinned_gog_digest() -> None:
     source = DOCKERFILE.read_text()
     assert "FROM scratch AS openclaw_assets" in source
     assert "ARG OPENCLAW_ASSET_MODE=online" in source
-    assert source.count("--mount=type=bind,from=openclaw_assets,target=/staged") == 4
+    assert source.count("--mount=type=bind,from=openclaw_assets,target=/staged") == 5
     assert 'GOGCLI_ARCHIVE="/staged/linux-${TARGETARCH}/gogcli.tar.gz"' in source
     assert source.index('"${GOGCLI_SHA256#sha256:}" "$GOGCLI_ARCHIVE"') < source.index('tar -xzf "$GOGCLI_ARCHIVE"')
     assert "--archive-file /staged/common/gogcli-skills.tar.gz" in source
     assert "--archive-file /staged/common/soul-guardian.tar.gz" in source
+    assert "--archive-file /staged/common/humanizer.tar.gz" in source
     assert source.count("--ownership-output /usr/local/share/openclaw-integrity/gog-skill-roots.txt") == 2
