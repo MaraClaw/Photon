@@ -18,7 +18,7 @@ def main() -> None:
         asset_root = Path(asset_dir).expanduser().resolve()
         required = [
             *(asset_root / f"linux-{architecture}" / name for architecture in ("amd64", "arm64") for name in ("gogcli.tar.gz", "officecli")),
-            *(asset_root / "common" / name for name in ("officecli-SKILL.md", "gogcli-skills.tar.gz", "soul-guardian.tar.gz")),
+            *(asset_root / "common" / name for name in ("officecli-SKILL.md", "gogcli-skills.tar.gz", "soul-guardian.tar.gz", "humanizer.tar.gz")),
         ]
         missing = [str(path) for path in required if not path.is_file()]
         if missing:
@@ -51,7 +51,7 @@ def main() -> None:
             print(
                 docker.run(
                     image,
-                    ["sh", "-c", 'test "$(id -u)" != 0 && openclaw --version'],
+                    ["sh", "-c", 'test "$(id -u)" != 0 && test "$HOME" = /home/node && test -w "$HOME/.openclaw" && test ! -w /usr/local/share/openclaw-integrity && openclaw --version'],
                     name=container,
                     remove=True,
                     networks=["none"],
@@ -63,7 +63,7 @@ def main() -> None:
             print(
                 docker.run(
                     image,
-                    ["sh", "-c", 'for validator in gogcli officecli soul-guardian linkup; do "/usr/local/bin/validate-$validator.sh" true || exit; done'],
+                    ["sh", "-c", 'for validator in gogcli officecli soul-guardian linkup humanizer; do "/usr/local/bin/validate-$validator.sh" true || exit; done'],
                     name=container,
                     remove=True,
                     networks=["none"],
@@ -79,7 +79,7 @@ def main() -> None:
                     [
                         "-c",
                         'su -s /bin/sh node -c "/usr/local/bin/validate-officecli.sh true" || exit 1; '
-                        'printf "\\n" >> "$(npm root -g)/openclaw/skills/officecli/SKILL.md" || exit 1; '
+                        'printf "\\n" >> /home/node/.openclaw/skills/officecli/SKILL.md || exit 1; '
                         'if su -s /bin/sh node -c "/usr/local/bin/validate-officecli.sh true"; then exit 1; fi',
                     ],
                     entrypoint="/bin/sh",

@@ -16,7 +16,7 @@ esac
 probe_dir=${validator_path%/*}
 . "$probe_dir/startup-probe.sh"
 
-if ! probe_run python3 -B "$probe_dir/installed-assets.py" verify --component linkup --inventory-dir /usr/local/share/openclaw-integrity; then
+if ! probe_run python3 -B "$probe_dir/installed-assets.py" verify --component linkup --inventory-dir /usr/local/share/openclaw-integrity --skills-root "$HOME/.openclaw/skills"; then
     printf '%s\n' 'Installed assets failed verification: linkup' >&2
     exit 1
 fi
@@ -26,16 +26,7 @@ fail() {
     exit 1
 }
 
-if ! probe_capture npm root -g || [ -z "$probe_output" ]; then
-    fail linkup
-fi
-npm_root=$probe_output
-
-if ! probe_run python3 -B "$probe_dir/installed-assets.py" verify --component linkup --inventory-dir /usr/local/share/openclaw-integrity --skills-root "$npm_root/openclaw/skills"; then
-    fail linkup
-fi
-
-skills="$npm_root/openclaw/skills"
+skills="$HOME/.openclaw/skills"
 for name in linkup-search linkup-fetch; do
     skill="$skills/$name"
     file="$skill/SKILL.md"

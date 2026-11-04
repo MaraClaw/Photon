@@ -37,14 +37,14 @@ def test_linkup_slashless_script_lookup(installation: tuple[Path, dict[str, str]
 @pytest.fixture
 def installation(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     npm_root = tmp_path / "npm root with spaces"
-    skills = npm_root / "openclaw/skills"
+    skills = npm_root / ".openclaw/skills"
     skills.mkdir(parents=True)
     for name in NAMES:
         shutil.copytree(PACKAGES / name, skills / name)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     npm = bin_dir / "npm"
-    npm.write_text('#!/bin/sh\n[ "$*" = "root -g" ] || exit 2\n[ "${NPM_FAIL:-}" != 1 ] || exit 3\nprintf "%s\\n" "$NPM_ROOT"\n')
+    npm.write_text('#!/bin/sh\nexit 99\n')
     npm.chmod(0o755)
     env = os.environ | {"PATH": f'{bin_dir}:{os.environ["PATH"]}', "NPM_ROOT": str(npm_root)}
     env.pop("LINKUP_API_BASE", None)
@@ -182,16 +182,14 @@ def test_invalid_reference_blocks_command(
     assert result.stderr == ("Installed assets failed verification: linkup\n" if failure == "missing" else f"Required skill failed verification: {name}\n")
 
 
-@pytest.mark.parametrize("failure", ["npm-failure", "empty-root"])
-def test_npm_discovery_failure_blocks_command(installation: tuple[Path, dict[str, str]], failure: str) -> None:
+def test_home_redirect_blocks_command(installation: tuple[Path, dict[str, str]], tmp_path: Path) -> None:
     _, env = installation
-    env["NPM_FAIL" if failure == "npm-failure" else "NPM_ROOT"] = "1" if failure == "npm-failure" else ""
-    result = subprocess.run(["/bin/sh", env["VALIDATOR"], "/bin/false"], env=env, capture_output=True, text=True, check=False)
+    result = subprocess.run(["/bin/sh", env["VALIDATOR"], "/bin/false"], env=env | {"HOME": str(tmp_path / "other")}, capture_output=True, text=True, check=False)
     assert result.returncode == 1
-    assert result.stderr == "Required skill failed verification: linkup\n"
+    assert result.stderr == "Installed assets failed verification: linkup\n"
 
 
-@pytest.mark.parametrize("probe", ["npm", "awk", "python3"])
+@pytest.mark.parametrize("probe", ["awk", "python3"])
 def test_linkup_hanging_probe_times_out(installation: tuple[Path, dict[str, str]], probe: str) -> None:
     skills, env = installation
     root = skills.parents[2]
@@ -204,7 +202,7 @@ def test_linkup_hanging_probe_times_out(installation: tuple[Path, dict[str, str]
 def test_invalid_policy_prevents_linkup_probes(installation: tuple[Path, dict[str, str]], key: str, value: str) -> None:
     skills, env = installation
     root = skills.parents[2]
-    install_hang(root, env, root / "bin/npm")
+    install_hang(root, env, root / "bin/awk")
     exercise_invalid_policy(Path(env["VALIDATOR"]), env, key, value)
 
 
@@ -221,7 +219,7 @@ def test_linkup_restart_rechecks_hanging_probe(installation: tuple[Path, dict[st
     root = skills.parents[2]
     assert subprocess.run(["/bin/sh", env["VALIDATOR"], "/bin/sh", "-c", ":"], env=env, timeout=5, check=False).returncode == 0
     (root / ".linkup-checked").touch()
-    install_hang(root, env, root / "bin/npm")
+    install_hang(root, env, root / "bin/awk")
     exercise_timeout(Path(env["VALIDATOR"]), env)
 
 

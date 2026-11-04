@@ -1,14 +1,18 @@
 # Photon
 
-Photon builds and publishes MaraClaw's OpenClaw guest image for linux/amd64 and linux/arm64. The image installs pinned gogcli and OfficeCLI at build time and bundles the OfficeCLI skill and all 32 upstream gogcli skills, replacing OpenClaw's built-in `gog` skill. Google skills require appropriate Google credentials, authorization, and API access. The included `crabbox` skill is for maintainers and requires an external Crabbox installation and an appropriate repository checkout. Startup verifies both CLIs, the soul-guardian skill, and the two bundled Linkup skills without downloading or changing OpenClaw state or configuration. Linkup validation needs no credentials; actual requests use the authenticated MaraClaw engine proxy. If `GOG_KEYRING_PASSWORD_FILE` is set, `GOG_HOME` must also be set; the validator reads the password into the process environment and creates `GOG_HOME` with mode 0700.
+Photon builds and publishes MaraClaw's OpenClaw guest image for linux/amd64 and linux/arm64. The image installs pinned gogcli and OfficeCLI at build time and bundles the OfficeCLI skill and all 32 upstream gogcli skills in `/home/node/.openclaw/skills`. Google skills require appropriate Google credentials, authorization, and API access. The included `crabbox` skill is for maintainers and requires an external Crabbox installation and an appropriate repository checkout. Startup verifies both CLIs, the soul-guardian skill, and the two bundled Linkup skills without downloading or changing OpenClaw state or configuration. Linkup validation needs no credentials; actual requests use the authenticated MaraClaw engine proxy. If `GOG_KEYRING_PASSWORD_FILE` is set, `GOG_HOME` must also be set; the validator reads the password into the process environment and creates `GOG_HOME` with mode 0700.
+
+Mount persistent state outside `/home/node/.openclaw` so it does not hide the image skills. MaraClaw uses `/home/node/custom-state`, sets `OPENCLAW_STATE_DIR` and `OPENCLAW_CONFIG_PATH` accordingly, and adds `/home/node/.openclaw/skills` to `skills.load.extraDirs`. These skills load as `openclaw-extra`; pinned OpenClaw's bundled `gog` takes precedence over the duplicate home-installed `gog`.
 
 The gogcli skill archive is pinned by commit and SHA256 in `docker/openclaw/install-gogcli-skills.sh`. To update it, verify the new commit archive and update both pins together; the complete `.agents/skills` tree is installed at build time.
 
 The image also bundles `soul-guardian` from `prompt-security/clawsec`, including its AGPL-3.0 license. Its source archive commit and SHA256 are pinned in `docker/openclaw/install-soul-guardian.sh`; verify a new archive independently and update both pins together. The checksum verifies the pinned archive, not a publisher signature. Bundling does not initialize a baseline or enable monitoring: review the installed skill's `SKILL.md` and explicitly opt in to baseline creation and monitoring. Its default restore policy can overwrite changed workspace files, and guardian state may contain sensitive snapshots.
 
+The image also installs the Humanizer skill and its upstream license at build time. Its installer owns the default archive commit and SHA256; `HUMANIZER_COMMIT` and `HUMANIZER_SHA256` optionally override those pins for local builds and publication. Startup validates the installed skill offline before bootstrap.
+
 ## Startup probe policy
 
-Each external validation probe has a 30-second deadline and a 2-second termination grace. Override these with `OPENCLAW_PROBE_TIMEOUT_SECONDS` and `OPENCLAW_PROBE_GRACE_SECONDS`; both must be positive decimal seconds (fractions are allowed, but empty, zero, negative, non-finite, whitespace and exponent forms are rejected before any probe). Invalid policy exits 2, timeout exits 124, and handled HUP, INT or TERM exits 128 plus the signal number. Probe output is suppressed; captured npm metadata and file-backed passwords are private and trailing newlines are stripped.
+Each external validation probe has a 30-second deadline and a 2-second termination grace. Override these with `OPENCLAW_PROBE_TIMEOUT_SECONDS` and `OPENCLAW_PROBE_GRACE_SECONDS`; both must be positive decimal seconds (fractions are allowed, but empty, zero, negative, non-finite, whitespace and exponent forms are rejected before any probe). Invalid policy exits 2, timeout exits 124, and handled HUP, INT or TERM exits 128 plus the signal number. Probe output is suppressed; captured output and file-backed passwords are private and trailing newlines are stripped.
 
 The shared Python supervisor terminates the probe process group, escalates to KILL after the grace on timeout or cancellation, and reaps owned descendants on Linux. Residual group members are terminated on ordinary completion too. This covers non-daemonizing probes that stay in their process group, not escaped sessions or uninterruptible kernel waits. The final command is executed unchanged, outside the deadline, after supervision and capture files have been removed. Direct validator use requires POSIX sh, Python 3 with `waitid`/`WNOWAIT`, writable temporary storage, and both `startup-probe` helpers beside the validator; Linux also requires working `prctl` subreaper support. Darwin supports process-group termination for host tests; Linux is the descendant-reaping authority.
 
@@ -23,7 +27,7 @@ Copy `.env.example` to `.env` if you want project-local configuration. Both scri
 The local build loads one target (default `linux/arm64`) and defaults to `openclaw:local`. Its tag must match the engine's `MARACLAW_OPENCLAW_IMAGE` and it must be loaded on the same Docker daemon used by the worker. For example, with no overriding assignment in the selected env file:
 
 ```bash
-MARACLAW_OPENCLAW_IMAGE=openclaw:2026.10.9 ./build-openclaw-local-dockerfile.sh
+MARACLAW_OPENCLAW_IMAGE=openclaw:2026.10.10 ./build-openclaw-local-dockerfile.sh
 ```
 
 Set `DOCKER_PLATFORM=linux/amd64` for the other supported target. Keep the OpenClaw version and checksum aligned with the intended image tag.
@@ -36,6 +40,7 @@ Online acquisition is the default. To use previously acquired assets, set `OPENC
 common/officecli-SKILL.md
 common/gogcli-skills.tar.gz
 common/soul-guardian.tar.gz
+common/humanizer.tar.gz
 linux-amd64/gogcli.tar.gz
 linux-amd64/officecli
 linux-arm64/gogcli.tar.gz
@@ -58,7 +63,7 @@ Alternatively set `OPENCLAW_PUBLISH_IMAGE`; `IMAGE_TAG` defaults to `OPENCLAW_VE
 
 ## Test
 
-With Python 3.14.8 and uv installed, run the standalone suite without Docker or other services:
+With Python 3.15.2 and uv installed, run the standalone suite without Docker or other services:
 
 ```bash
 uv run --extra dev pytest
@@ -72,7 +77,7 @@ git config core.hooksPath .githooks
 
 The tests must pass for the push to proceed.
 
-The real dual-architecture Docker integration smoke is opt-in. It needs Docker buildx, network access, both target execution environments, and host Node `v26.12.1`:
+The real dual-architecture Docker integration smoke is opt-in. It needs Docker buildx, network access, both target execution environments, and host Node `v26.13.0`:
 
 ```bash
 RUN_OPENCLAW_OFFICECLI_SMOKE=1 uv run --extra dev pytest tests/test_openclaw_officecli_container_smoke.py

@@ -6,7 +6,7 @@ description: Use when you already know the exact URL and need its content as cle
 
 # Linkup Fetch
 
-When you already have the exact URL, use **Fetch** instead of search. It is faster and cheaper, and returns the page as clean Markdown (with JavaScript rendering and optional image extraction).
+When you already have the exact URL, use **Fetch** instead of search. It is faster and cheaper, and returns the page as clean Markdown (with JavaScript rendering and optional image retrieval).
 
 ## How to call it
 
@@ -36,7 +36,7 @@ Important: fetch reads page *content*; it cannot produce structured JSON from a 
 
 ## After fetching
 
-- Extract only the fields the task needs; don't dump the whole page back to the user.
+- Keep only the fields the task needs; don't dump the whole page back to the user.
 - Keep the source URL so every claim can be verified.
 
 For the full endpoint reference, read `references/LINKUP_API_REFERENCE.md` (Fetch API section) in this skill's directory.

@@ -23,7 +23,7 @@ retrieval system. Good queries make the intended retrieval plan obvious:
 - what information to find
 - where to search, if known
 - which URLs to scrape, if known or discoverable
-- which fields to extract
+- which fields to return
 - whether work can happen in parallel or must happen step by step
 - what counts as enough evidence
 
@@ -72,7 +72,7 @@ Stripe CEO
 Bad:
 
 ```text
-First find Stripe's pricing page, then scrape it and extract plan details.
+First find Stripe's pricing page, then scrape it and return plan details.
 ```
 
 Use `standard` when:
@@ -94,13 +94,13 @@ Run separate searches for each metric and prefer investor relations sources.
 ```
 
 ```text
-Scrape https://example.com/pricing. Extract plan names, prices, limits, and included features.
+Scrape https://example.com/pricing. Return plan names, prices, limits, and included features.
 ```
 
 Bad for `standard`:
 
 ```text
-Find Acme's pricing page, then scrape it and extract every plan.
+Find Acme's pricing page, then scrape it and return every plan.
 ```
 
 That needs `deep` unless the pricing URL is already known.
@@ -119,7 +119,7 @@ step wording so the order is obvious.
 Good:
 
 ```text
-First find Acme's official pricing page. Then scrape it. Extract every plan name, price, billing
+First find Acme's official pricing page. Then scrape it. Return every plan name, price, billing
 unit, limits, and included features. If the pricing page links to add-ons or enterprise details,
 scrape those pages too.
 ```
@@ -129,9 +129,9 @@ scrape those pages too.
 A good optimized query includes:
 
 1. Target: entity, topic, URL, domain, person, or source family.
-2. Retrieval action: `find`, `search`, `scrape`, `extract`, `count`, or `compare`.
+2. Retrieval action: `find`, `search`, `scrape`, `count`, or `compare`.
 3. Scope: official site, docs, pricing, investor relations, country, date range, or domain.
-4. Fields: exact data to extract.
+4. Fields: exact data to return.
 5. Order: only when using `deep`.
 6. Evidence rule: source URL for each claim.
 
@@ -148,10 +148,10 @@ Classify the user's objective before writing the query:
 
 - Single known fact: use `fast` or `standard`; concise keyword query.
 - A few independent facts: use `standard`; ask for separate searches per fact.
-- One known URL to read: use `standard` or `/fetch`; say "scrape" and list extraction fields.
-- Unknown URL then page extraction: use `deep`; say "first find, then scrape."
+- One known URL to read: use `standard` or `/fetch`; say "scrape" and list the fields to return.
+- Unknown URL then page content: use `deep`; say "first find, then scrape."
 - Multiple known URLs: use `deep`, or several parallel `standard`/`fetch` calls outside one request.
-- Multi-entity or multi-dimension research: use `deep`; make the structure explicit.
+- Multi-entity or multi-dimension lookups: use `deep`; make the structure explicit.
 - Parsed downstream data: use `structured` with a shallow schema.
 
 ## Standard Templates
@@ -169,7 +169,7 @@ search. Ask for distinct facets, entities, dates, or source types.
 ### Known URL
 
 ```text
-Scrape {url}. Extract {field_1}, {field_2}, and {field_3}. Preserve the source URL.
+Scrape {url}. Return {field_1}, {field_2}, and {field_3}. Preserve the source URL.
 ```
 
 ### Known URL Plus Parallel Searches
@@ -187,18 +187,18 @@ Use this when the user has one known page and also wants external context.
 
 ```text
 First find the official {page_type} for {entity}. Then scrape it. Also run a separate web search for
-{related_context}. Extract {fields}. Return source URLs for each finding.
+{related_context}. Return {fields} along with source URLs for each finding.
 ```
 
 Do not be stingy in `deep`: if extra context is useful, ask for the extra web search directly rather
 than conditionally.
 
-### Multi-Page Extraction
+### Multi-Page Scrape
 
 ```text
 First find the official website for {entity}. Then scrape the homepage, about page, and relevant
 product/docs/pricing pages. Also run separate web searches for {facet_1}, {facet_2}, and {facet_3}.
-Extract {fields} and source URLs.
+Return {fields} and source URLs.
 ```
 
 ### Counting or Ranking
@@ -211,7 +211,7 @@ that meet {criteria}. Enumerate included and excluded items before giving the fi
 ### Ambiguous Entity
 
 ```text
-Find and scrape pages about {entity}, the {disambiguating_description}, at {domain}. Extract
+Find and scrape pages about {entity}, the {disambiguating_description}, at {domain}. Return
 {fields}. Prefer official pages and documentation.
 ```
 
@@ -253,11 +253,11 @@ Use scraping when the URL is known, or in `deep` after search results reveal a U
 Prompts that steer scraping well:
 
 ```text
-Scrape https://company.com/careers. Extract open roles, locations, departments, and seniority.
+Scrape https://company.com/careers. Return open roles, locations, departments, and seniority.
 ```
 
 ```text
-First find the official annual report PDF for TotalEnergies 2024. Then scrape it and extract total
+First find the official annual report PDF for TotalEnergies 2024. Then scrape it and return total
 revenue, net income, and capex.
 ```
 
@@ -287,25 +287,17 @@ Search LinkedIn posts about {topic}. Return post URLs, authors, dates, and post 
 ```
 
 ```text
-Extract comments from {linkedin_post_url}
+Return the comments of {linkedin_post_url}
 ```
 
 ```text
 Return the last 10 LinkedIn comments of {linkedin_profile_or_company_url}
 ```
 
-Avoid verbose comments prompts. In practice, this phrasing routed to normal scraping instead of the
-LinkedIn comments action:
-
-```text
-Extract the comments from this LinkedIn post: {url}. Return commenter names, profile URLs, comment
-text, and dates.
-```
-
 When the task only needs LinkedIn profile URLs as evidence, say so explicitly:
 
 ```text
-Extract LinkedIn profile URLs as text evidence only. Do not retrieve LinkedIn posts.
+Return LinkedIn profile URLs as text evidence only. Do not retrieve LinkedIn posts.
 ```
 
 ### Pappers, Yahoo Finance, Google Maps

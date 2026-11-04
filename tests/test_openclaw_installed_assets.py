@@ -23,7 +23,7 @@ def verify(env: dict[str, str], component: str) -> subprocess.CompletedProcess[s
     return subprocess.run([sys.executable, env["INTEGRITY_HELPER"], "verify", "--component", component, "--inventory-dir", env["INTEGRITY_DIR"]], capture_output=True, text=True, check=False)
 
 
-@pytest.mark.parametrize("component,name", [("gogcli", "crabbox"), ("officecli", "officecli"), ("soul-guardian", "soul-guardian"), ("linkup", "linkup-fetch")])
+@pytest.mark.parametrize("component,name", [("gogcli", "crabbox"), ("officecli", "officecli"), ("soul-guardian", "soul-guardian"), ("linkup", "linkup-fetch"), ("humanizer", "humanizer")])
 @pytest.mark.parametrize("change", ["bytes", "missing", "extra"])
 def test_owned_changes_are_rejected(inventory: tuple[Path, dict[str, str]], component: str, name: str, change: str) -> None:
     skills, env = inventory

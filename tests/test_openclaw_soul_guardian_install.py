@@ -47,9 +47,9 @@ def install_fixture(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     )
     curl.chmod(0o755)
     npm = bin_dir / "npm"
-    npm.write_text('#!/bin/sh\nprintf "%s\\n" "$NPM_ROOT"\n')
+    npm.write_text('#!/bin/sh\nexit 99\n')
     npm.chmod(0o755)
-    destination = tmp_path / "npm root/openclaw/skills"
+    destination = tmp_path / "npm root/.openclaw/skills"
     (destination / "soul-guardian").mkdir(parents=True)
     (destination / "soul-guardian/stale").write_text("old")
     (destination / "officecli").mkdir()
@@ -61,6 +61,7 @@ def install_fixture(tmp_path: Path) -> tuple[Path, dict[str, str]]:
         "PATH": f'{bin_dir}:{os.environ["PATH"]}',
         "ARCHIVE": str(archive),
         "NPM_ROOT": str(tmp_path / "npm root"),
+        "HOME": str(tmp_path / "npm root"),
         "CURL_LOG": str(tmp_path / "curl.log"),
         "TMPDIR": str(stages),
     }
@@ -71,7 +72,7 @@ def test_verified_archive_installs_only_soul_guardian(install_fixture: tuple[Pat
     script, env = install_fixture
     result = subprocess.run(["sh", str(script)], env=env, capture_output=True, text=True, check=False, timeout=10)
     assert result.returncode == 0, result.stderr
-    skills = Path(env["NPM_ROOT"]) / "openclaw/skills"
+    skills = Path(env["HOME"]) / ".openclaw/skills"
     assert {path.name for path in skills.iterdir()} == {"soul-guardian", "officecli"}
     assert (skills / "soul-guardian/SKILL.md").read_text() == "soul-guardian upstream\n"
     assert (skills / "soul-guardian/LICENSE").read_text() == "upstream license\n"
@@ -100,7 +101,7 @@ def test_untrusted_archive_preserves_existing_skills_and_cleans_stage(
         capture_output=True, text=True, check=False, timeout=10,
     )
     assert result.returncode != 0
-    skills = Path(env["NPM_ROOT"]) / "openclaw/skills"
+    skills = Path(env["HOME"]) / ".openclaw/skills"
     assert (skills / "soul-guardian/stale").read_text() == "old"
     assert (skills / "officecli/SKILL.md").read_text() == "officecli"
     assert {path.name for path in skills.iterdir()} == {"soul-guardian", "officecli"}
@@ -121,7 +122,7 @@ def test_local_archive_installs_without_network(install_fixture: tuple[Path, dic
     result = subprocess.run(["sh", str(script), "--archive-file", env["ARCHIVE"]],
                             env=env, capture_output=True, text=True, check=False, timeout=10)
     assert result.returncode == 0, result.stderr
-    assert (Path(env["NPM_ROOT"]) / "openclaw/skills/soul-guardian/SKILL.md").read_text() == "soul-guardian upstream\n"
+    assert (Path(env["HOME"]) / ".openclaw/skills/soul-guardian/SKILL.md").read_text() == "soul-guardian upstream\n"
     assert not Path(env["CURL_LOG"]).exists()
 
 
@@ -131,7 +132,7 @@ def test_successful_rerun_replaces_existing_install(install_fixture: tuple[Path,
         result = subprocess.run([str(script), "--archive-file", env["ARCHIVE"]], env=env,
                                 capture_output=True, text=True, timeout=10)
         assert result.returncode == 0, result.stderr
-    assert (Path(env["NPM_ROOT"]) / "openclaw/skills/soul-guardian/LICENSE").read_text() == "upstream license\n"
+    assert (Path(env["HOME"]) / ".openclaw/skills/soul-guardian/LICENSE").read_text() == "upstream license\n"
     assert not list(Path(env["TMPDIR"]).iterdir())
 
 
@@ -144,7 +145,7 @@ def test_bad_local_archive_fails_without_network(install_fixture: tuple[Path, di
     result = subprocess.run(["sh", str(script), "--archive-file", str(archive)],
                             env=env, capture_output=True, text=True, check=False, timeout=10)
     assert result.returncode != 0
-    assert (Path(env["NPM_ROOT"]) / "openclaw/skills/soul-guardian/stale").exists()
+    assert (Path(env["HOME"]) / ".openclaw/skills/soul-guardian/stale").exists()
     assert not Path(env["CURL_LOG"]).exists()
 
 
@@ -154,7 +155,7 @@ def test_replacement_recovers_after_write(
     install_fixture: tuple[Path, dict[str, str]], failure: str, prior: bool
 ) -> None:
     script, env = install_fixture
-    target = Path(env["NPM_ROOT"]) / "openclaw/skills/soul-guardian"
+    target = Path(env["HOME"]) / ".openclaw/skills/soul-guardian"
     if prior:
         (target / "LICENSE").write_bytes(b"old license\x00\n")
         (target / "link").symlink_to("stale")
@@ -236,7 +237,7 @@ def test_overridden_pins_select_archive_and_digest(install_fixture: tuple[Path, 
     args = ["--archive-file", str(archive)] if mode == "local" else []
     result = run_installer(script, env | {"ARCHIVE": str(archive), COMMIT_KEY: OTHER_COMMIT, SHA_KEY: digest}, *args)
     assert result.returncode == 0, result.stderr
-    installed = Path(env["NPM_ROOT"]) / "openclaw/skills/soul-guardian"
+    installed = Path(env["HOME"]) / ".openclaw/skills/soul-guardian"
     assert (installed / "LICENSE").read_text() == "upstream license\n"
     assert not (installed / "stale").exists()
     if mode == "download":
@@ -251,7 +252,7 @@ def test_default_pins_apply_when_unset_or_empty(install_fixture: tuple[Path, dic
     result = run_installer(script, unpinned(env, **({COMMIT_KEY: "", SHA_KEY: ""} if empty else {})))
     assert result.returncode != 0  # the default digest rejects the fixture archive
     assert Path(env["CURL_LOG"]).read_text().strip().endswith(f"/tar.gz/{COMMIT}")
-    assert (Path(env["NPM_ROOT"]) / "openclaw/skills/soul-guardian/stale").read_text() == "old"
+    assert (Path(env["HOME"]) / ".openclaw/skills/soul-guardian/stale").read_text() == "old"
 
 
 def test_partial_resolution_resolves_each_pin_independently(install_fixture: tuple[Path, dict[str, str]]) -> None:
@@ -285,7 +286,7 @@ def test_malformed_commit_is_rejected_before_acquisition(
     assert not Path(env["CURL_LOG"]).exists()
     assert not (script.parent / "cp.log").exists()
     assert not marker.exists()
-    assert (Path(env["NPM_ROOT"]) / "openclaw/skills/soul-guardian/stale").read_text() == "old"
+    assert (Path(env["HOME"]) / ".openclaw/skills/soul-guardian/stale").read_text() == "old"
     assert not list(Path(env["TMPDIR"]).iterdir())
 
 
@@ -300,6 +301,6 @@ def test_wrong_digest_is_rejected_before_extraction_or_mutation(
     result = run_installer(script, env | {SHA_KEY: digest}, *args)
     assert result.returncode != 0
     assert not marker.exists()
-    skills = Path(env["NPM_ROOT"]) / "openclaw/skills"
+    skills = Path(env["HOME"]) / ".openclaw/skills"
     assert (skills / "soul-guardian/stale").read_text() == "old"
     assert not list(Path(env["TMPDIR"]).iterdir())

@@ -17,7 +17,7 @@ from test_openclaw_build_script import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PUBLISH_SCRIPT = REPO_ROOT / "publish-openclaw-local-dockerfile.sh"
-OPENCLAW_VERSION = "2026.10.9"
+OPENCLAW_VERSION = "2026.10.10"
 
 
 def build_env(bin_dir: Path, log_path: Path, missing_env_file: Path) -> dict[str, str]:
@@ -220,12 +220,12 @@ def test_docker_failure_propagates_without_false_success(tmp_path: Path, script:
     assert "Published" not in result.stdout
 
 
-@pytest.mark.parametrize("missing", [None, "linux-amd64/officecli", "linux-arm64/gogcli.tar.gz", "common/soul-guardian.tar.gz"])
+@pytest.mark.parametrize("missing", [None, "linux-amd64/officecli", "linux-arm64/gogcli.tar.gz", "common/soul-guardian.tar.gz", "common/humanizer.tar.gz"])
 def test_staged_publish_requires_both_targets_before_docker(tmp_path: Path, missing: str | None) -> None:
     bin_dir, log_path = install_fake_docker(tmp_path)
     assets = tmp_path / "assets with spaces"
     for name in ("linux-amd64/gogcli.tar.gz", "linux-amd64/officecli", "linux-arm64/gogcli.tar.gz",
-                 "linux-arm64/officecli", "common/officecli-SKILL.md", "common/gogcli-skills.tar.gz", "common/soul-guardian.tar.gz"):
+                 "linux-arm64/officecli", "common/officecli-SKILL.md", "common/gogcli-skills.tar.gz", "common/soul-guardian.tar.gz", "common/humanizer.tar.gz"):
         if name != missing:
             path = assets / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -250,7 +250,7 @@ def test_staged_publish_keeps_staged_arguments_and_tags_with_archive_pins(tmp_pa
     bin_dir, log_path = install_fake_docker(tmp_path)
     assets = tmp_path / "assets with spaces"
     for name in ("linux-amd64/gogcli.tar.gz", "linux-amd64/officecli", "linux-arm64/gogcli.tar.gz",
-                 "linux-arm64/officecli", "common/officecli-SKILL.md", "common/gogcli-skills.tar.gz", "common/soul-guardian.tar.gz"):
+                 "linux-arm64/officecli", "common/officecli-SKILL.md", "common/gogcli-skills.tar.gz", "common/soul-guardian.tar.gz", "common/humanizer.tar.gz"):
         path = assets / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()

@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Final
 
-COMPONENTS: Final = ("gogcli", "officecli", "soul-guardian", "linkup")
+COMPONENTS: Final = ("gogcli", "officecli", "soul-guardian", "linkup", "humanizer")
 DIRECTORY_FLAGS: Final = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 
 
@@ -67,6 +67,7 @@ def create(skills_root: Path, roots_file: Path, output_dir: Path) -> None:
         "officecli": [Path("/usr/local/bin/officecli"), skills_root / "officecli"],
         "soul-guardian": [skills_root / "soul-guardian"],
         "linkup": [skills_root / "linkup-search", skills_root / "linkup-fetch"],
+        "humanizer": [skills_root / "humanizer"],
     }
     inventories = {
         component: [{"path": str(root), "entries": scan_root(str(root))} for root in paths]

@@ -16,6 +16,8 @@ The skill requests use the authenticated MaraClaw engine proxy.
 ## Editing Rules
 
 - Prefer refreshing from upstream over rewriting skill prose.
+- Keep the vendored skills limited to search and fetch; preserve this scope
+  after an upstream refresh.
 - Do not add an engine Python search handler for Linkup.
 
 ## Image Ownership

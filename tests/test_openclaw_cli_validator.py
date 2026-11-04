@@ -30,10 +30,10 @@ def make_validator(tmp_path: Path, name: str) -> tuple[Path, dict[str, str]]:
     binary.write_text('#!/bin/sh\nprintf "%s:%s\\n" "${0##*/}" "$*" >> "$PROBE_LOG"\nprintf "probe output\\n"\nprintf "probe error\\n" >&2\n')
     binary.chmod(0o755)
     npm = bin_dir / "npm"
-    npm.write_text('#!/bin/sh\n[ "$*" = "root -g" ] || exit 2\nprintf "%s\\n" "$NPM_ROOT"\nprintf "%s\\n" "$GOG_KEYRING_PASSWORD" >&2\nexit "${NPM_STATUS:-0}"\n')
+    npm.write_text('#!/bin/sh\nexit 99\n')
     npm.chmod(0o755)
     npm_root = tmp_path / "npm root with spaces"
-    skill_dir = npm_root / "openclaw" / "skills" / name
+    skill_dir = npm_root / ".openclaw" / "skills" / name
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("installed skill\n")
     script = tmp_path / "validator with spaces.sh"
@@ -86,7 +86,7 @@ def test_missing_or_broken_cli_blocks_child(cli_validator: tuple[Path, dict[str,
 @pytest.mark.parametrize("failure", ["missing-file", "empty-file", "dangling-symlink", "missing-directory", "file-is-directory"])
 def test_invalid_skill_blocks_child(cli_validator: tuple[Path, dict[str, str], str], failure: str) -> None:
     script, env, name = cli_validator
-    skill_dir = Path(env["NPM_ROOT"]) / "openclaw" / "skills" / name
+    skill_dir = Path(env["HOME"]) / ".openclaw" / "skills" / name
     skill = skill_dir / "SKILL.md"
     if failure != "empty-file":
         skill.unlink()
@@ -107,7 +107,7 @@ def test_invalid_skill_blocks_child(cli_validator: tuple[Path, dict[str, str], s
 
 def test_unreadable_skill_blocks_child(cli_validator: tuple[Path, dict[str, str], str]) -> None:
     script, env, name = cli_validator
-    skill = Path(env["NPM_ROOT"]) / "openclaw" / "skills" / name / "SKILL.md"
+    skill = Path(env["HOME"]) / ".openclaw" / "skills" / name / "SKILL.md"
     skill.chmod(0)
     if os.access(skill, os.R_OK):
         pytest.skip("current user can read mode-000 files")
@@ -115,17 +115,6 @@ def test_unreadable_skill_blocks_child(cli_validator: tuple[Path, dict[str, str]
     assert result.returncode == 1
     assert result.stdout == ""
     assert result.stderr == f"Installed assets failed verification: {'gogcli' if name == 'gog' else name}\n"
-    assert not Path(env["CHILD_LOG"]).exists()
-
-
-@pytest.mark.parametrize("failure", ["failed", "empty"])
-def test_unavailable_npm_root_blocks_child(cli_validator: tuple[Path, dict[str, str], str], failure: str) -> None:
-    script, env, name = cli_validator
-    npm_env = {"NPM_STATUS": "37"} if failure == "failed" else {"NPM_ROOT": ""}
-    result = run_validator((script, env), "/bin/sh", "-c", 'touch "$CHILD_LOG"', GOG_KEYRING_PASSWORD="secret-value", **npm_env)
-    assert result.returncode == 1
-    assert result.stdout == ""
-    assert result.stderr == f"Required skill failed verification: {name}\n"
     assert not Path(env["CHILD_LOG"]).exists()
 
 
@@ -197,10 +186,9 @@ def test_restart_rechecks_each_cli(cli_validator: tuple[Path, dict[str, str], st
     assert not Path(env["CHILD_LOG"]).exists()
 
 
-@pytest.mark.parametrize("probe", ["version", "npm"])
-def test_hanging_cli_probe_times_out(cli_validator: tuple[Path, dict[str, str], str], probe: str) -> None:
+def test_hanging_cli_probe_times_out(cli_validator: tuple[Path, dict[str, str], str]) -> None:
     script, env, name = cli_validator
-    install_hang(script.parent, env, script.parent / "bin with spaces" / (name if probe == "version" else "npm"))
+    install_hang(script.parent, env, script.parent / "bin with spaces" / name)
     exercise_timeout(script, env)
 
 
@@ -213,9 +201,9 @@ def test_invalid_policy_prevents_cli_probes(cli_validator: tuple[Path, dict[str,
 
 
 @pytest.mark.parametrize("signum", [signal.SIGHUP, signal.SIGINT, signal.SIGTERM])
-def test_cli_signal_cleans_discovery_group(cli_validator: tuple[Path, dict[str, str], str], signum: int) -> None:
-    script, env, _ = cli_validator
-    install_hang(script.parent, env, script.parent / "bin with spaces/npm")
+def test_cli_signal_cleans_version_probe_group(cli_validator: tuple[Path, dict[str, str], str], signum: int) -> None:
+    script, env, name = cli_validator
+    install_hang(script.parent, env, script.parent / "bin with spaces" / name)
     exercise_signal(script, env, signum)
 
 
@@ -243,7 +231,7 @@ def test_successful_cli_probe_cleans_residual_descendant(cli_validator: tuple[Pa
 @pytest.mark.parametrize("asset", ["binary", "skill"])
 def test_valid_looking_tampering_blocks_cli_before_any_probe(cli_validator: tuple[Path, dict[str, str], str], asset: str) -> None:
     script, env, name = cli_validator
-    path = script.parent / "bin with spaces" / name if asset == "binary" else Path(env["NPM_ROOT"]) / "openclaw/skills" / ("crabbox" if name == "gog" else name) / ("fixture" if name == "gog" else "SKILL.md")
+    path = script.parent / "bin with spaces" / name if asset == "binary" else Path(env["HOME"]) / ".openclaw/skills" / ("crabbox" if name == "gog" else name) / ("fixture" if name == "gog" else "SKILL.md")
     path.write_text("#!/bin/sh\nexit 0\n" if asset == "binary" else "valid skill content\n")
     result = run_validator((script, env), "/bin/sh", "-c", 'touch "$CHILD_LOG"')
     assert result.returncode == 1
@@ -258,11 +246,12 @@ def test_untouched_cli_restart_uses_same_inventory(cli_validator: tuple[Path, di
     assert Path(env["PROBE_LOG"]).read_text().splitlines() == [f"{name}:--version"] * 2
 
 
-def test_discovery_cannot_redirect_cli_to_unverified_skills(cli_validator: tuple[Path, dict[str, str], str], tmp_path: Path) -> None:
+def test_home_cannot_redirect_cli_to_unverified_skills(cli_validator: tuple[Path, dict[str, str], str], tmp_path: Path) -> None:
     script, env, name = cli_validator
-    other = tmp_path / "other/openclaw/skills" / name
+    other = tmp_path / "other/.openclaw/skills" / name
     other.mkdir(parents=True)
     (other / "SKILL.md").write_text("valid skill\n")
-    result = run_validator((script, env), "/bin/sh", "-c", 'touch "$CHILD_LOG"', NPM_ROOT=str(other.parents[2]))
+    result = run_validator((script, env), "/bin/sh", "-c", 'touch "$CHILD_LOG"', HOME=str(other.parents[2]))
     assert result.returncode == 1
+    assert not Path(env["PROBE_LOG"]).exists()
     assert not Path(env["CHILD_LOG"]).exists()

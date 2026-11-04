@@ -39,7 +39,7 @@ def install_fixture(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     )
     curl.chmod(0o755)
     npm = bin_dir / "npm"
-    npm.write_text('#!/bin/sh\nprintf "%s\\n" "$NPM_ROOT"\n')
+    npm.write_text('#!/bin/sh\nexit 99\n')
     npm.chmod(0o755)
     env = os.environ | {
         "PATH": f'{bin_dir}:{os.environ["PATH"]}',
@@ -51,6 +51,7 @@ def install_fixture(tmp_path: Path) -> tuple[Path, dict[str, str]]:
         "OFFICECLI_SKILL_SHA256": hashlib.sha256(skill).hexdigest(),
         "FIXTURES": str(tmp_path),
         "NPM_ROOT": str(npm_root),
+        "HOME": str(npm_root),
         "EXEC_LOG": str(tmp_path / "executed"),
         "CURL_LOG": str(tmp_path / "curl.log"),
         "TMPDIR": str(tmp_path),
@@ -71,13 +72,13 @@ def test_pinned_artifacts_install_for_each_target(install_fixture: tuple[Path, d
     root = script.parent
     fixture_name = "binary-arm64" if architecture == "arm64" else "binary"
     assert (root / "system bin/officecli").read_bytes() == (root / fixture_name).read_bytes()
-    assert (root / "npm root/openclaw/skills/officecli/SKILL.md").read_bytes() == (root / "skill").read_bytes()
+    assert (root / "npm root/.openclaw/skills/officecli/SKILL.md").read_bytes() == (root / "skill").read_bytes()
     assert (root / "system bin/officecli").stat().st_mode & 0o777 == 0o755
-    assert (root / "npm root/openclaw/skills/officecli/SKILL.md").stat().st_mode & 0o777 == 0o644
+    assert (root / "npm root/.openclaw/skills/officecli/SKILL.md").stat().st_mode & 0o777 == 0o644
     lines = Path(environment["CURL_LOG"]).read_text().splitlines()
     assert len(lines) == 2
-    assert lines[0].endswith(f"/v1.0.159/{asset}")
-    assert lines[1].endswith("/v1.0.159/SKILL.md")
+    assert lines[0].endswith(f"/v1.0.160/{asset}")
+    assert lines[1].endswith("/v1.0.160/SKILL.md")
     for line in lines:
         assert line.startswith("--disable --config /dev/null ")
         assert "--proto =https --proto-redir =https" in line
@@ -177,7 +178,7 @@ def seed_previous(root: Path, binary_exists: bool, skill_exists: bool) -> None:
         binary.write_text("old binary")
         binary.chmod(0o751)
     if skill_exists:
-        skill = root / "npm root/openclaw/skills/officecli"
+        skill = root / "npm root/.openclaw/skills/officecli"
         skill.mkdir(parents=True)
         (skill / "SKILL.md").write_text("old skill")
         (skill / "extra").write_text("old extra")
@@ -187,7 +188,7 @@ def seed_previous(root: Path, binary_exists: bool, skill_exists: bool) -> None:
 
 def assert_previous(root: Path, binary_exists: bool, skill_exists: bool) -> None:
     binary = root / "system bin/officecli"
-    skill = root / "npm root/openclaw/skills/officecli"
+    skill = root / "npm root/.openclaw/skills/officecli"
     assert binary.exists() == binary_exists
     assert skill.exists() == skill_exists
     if binary_exists:
@@ -259,7 +260,7 @@ def test_successful_rerun_replaces_entire_skill(install_fixture: tuple[Path, dic
     assert result.returncode == 0, result.stderr
     result = run_installer(install_fixture)
     assert result.returncode == 0, result.stderr
-    skill = root / "npm root/openclaw/skills/officecli"
+    skill = root / "npm root/.openclaw/skills/officecli"
     assert sorted(path.name for path in skill.iterdir()) == ["SKILL.md"]
     assert (root / "system bin/officecli").read_bytes() == (root / "binary").read_bytes()
     assert not list(root.glob("officecli.*"))
@@ -269,7 +270,7 @@ def test_rollback_preserves_top_level_symlinks(install_fixture: tuple[Path, dict
     root = install_fixture[0].parent
     seed_previous(root, True, True)
     binary = root / "system bin/officecli"
-    skill = root / "npm root/openclaw/skills/officecli"
+    skill = root / "npm root/.openclaw/skills/officecli"
     binary.rename(binary.with_name("previous"))
     binary.symlink_to("previous")
     skill.rename(skill.with_name("previous"))

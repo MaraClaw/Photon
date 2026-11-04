@@ -16,8 +16,8 @@ from pywhales.exceptions import NoSuchContainer
 from openclaw_officecli_smoke_cleanup import CLEANUP_PROBE, CleanupFailure, run_cleanup
 
 REPO_ROOT: Final = Path(__file__).resolve().parents[1]
-STATE_DIR: Final = "/home/node/.openclaw"
-CUSTOM_STATE_DIR: Final = "/home/node/custom-state"
+STATE_DIR: Final = "/home/node/custom-state"
+CUSTOM_STATE_DIR: Final = "/home/node/alternate-state"
 KEYRING_PATH: Final = "/run/secrets/gogcli_keyring_password"
 docker = DockerClient(client_type="docker", raw_diagnostics=True)
 
@@ -142,6 +142,7 @@ def create_workspace() -> SmokeWorkspace:
                 config = {
                     "gateway": {"mode": "local", "auth": {"mode": "token", "token": "smoke-gateway-token"}},
                     "agents": {"defaults": {"workspace": f"{target}/workspace"}},
+                    "skills": {"load": {"extraDirs": ["/home/node/.openclaw/skills"]}},
                     "memory": {"search": {"enabled": True, "provider": "none"}},
                     "plugins": {"slots": {"memory": "memory-core"}},
                 }
@@ -185,7 +186,8 @@ def run_container(workspace: SmokeWorkspace, request: RunRequest) -> None:
             ["type=bind", f"source={request.state_dir}", f"target={request.state_target}"],
             ["type=bind", f"source={workspace.keyring_file}", f"target={KEYRING_PATH}", "readonly"],
         ],
-        envs={"OPENCLAW_STATE_DIR": request.state_target, "OPENCLAW_HOME": "/home/node",
+        envs={"HOME": "/home/node", "OPENCLAW_STATE_DIR": request.state_target, "OPENCLAW_HOME": "/home/node",
+              "OPENCLAW_CONFIG_PATH": f"{request.state_target}/openclaw.json",
               "GOG_HOME": f"{request.state_target}/gogcli", "GOG_KEYRING_PASSWORD_FILE": KEYRING_PATH,
               "GOG_KEYRING_BACKEND": "file", "EXPECTED_NODE_ARCH": node_architecture}, timeout=1200,
     )

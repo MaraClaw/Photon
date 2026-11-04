@@ -44,9 +44,9 @@ def install_fixture(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     )
     curl.chmod(0o755)
     npm = bin_dir / "npm"
-    npm.write_text('#!/bin/sh\nprintf "%s\\n" "$NPM_ROOT"\n')
+    npm.write_text('#!/bin/sh\nexit 99\n')
     npm.chmod(0o755)
-    destination = tmp_path / "npm root/openclaw/skills"
+    destination = tmp_path / "npm root/.openclaw/skills"
     (destination / "gog").mkdir(parents=True)
     (destination / "gog/stale").write_text("old")
     (destination / "officecli").mkdir()
@@ -58,6 +58,7 @@ def install_fixture(tmp_path: Path) -> tuple[Path, dict[str, str]]:
         "PATH": f'{bin_dir}:{os.environ["PATH"]}',
         "ARCHIVE": str(archive),
         "NPM_ROOT": str(tmp_path / "npm root"),
+        "HOME": str(tmp_path / "npm root"),
         "CURL_LOG": str(tmp_path / "curl.log"),
         "TMPDIR": str(stages),
     }
@@ -68,7 +69,7 @@ def test_verified_archive_replaces_gog_and_preserves_companions(install_fixture:
     script, env = install_fixture
     result = subprocess.run([str(script)], env=env, capture_output=True, text=True, check=False, timeout=15)
     assert result.returncode == 0, result.stderr
-    skills = Path(env["NPM_ROOT"]) / "openclaw/skills"
+    skills = Path(env["HOME"]) / ".openclaw/skills"
     assert (skills / "gog/SKILL.md").read_text() == "gog upstream\n"
     assert not (skills / "gog/stale").exists()
     assert (skills / "gog/agents/openai.yaml").read_text() == "interface: {}\n"
@@ -98,7 +99,7 @@ def test_untrusted_archive_installs_nothing_and_cleans_stage(
         capture_output=True, text=True, check=False, timeout=15,
     )
     assert result.returncode != 0
-    skills = Path(env["NPM_ROOT"]) / "openclaw/skills"
+    skills = Path(env["HOME"]) / ".openclaw/skills"
     assert (skills / "gog/stale").read_text() == "old"
     assert (skills / "officecli/SKILL.md").read_text() == "officecli"
     assert not (skills / "gog-calendar").exists()
@@ -214,7 +215,7 @@ def test_partial_write_restores_all_roots_and_ownership(
     install_fixture: tuple[Path, dict[str, str]], fault_signal: str
 ) -> None:
     script, env = install_fixture
-    skills = Path(env["NPM_ROOT"]) / "openclaw/skills"
+    skills = Path(env["HOME"]) / ".openclaw/skills"
     prepare_previous_skills(skills)
     ownership = script.parent / "ownership"
     ownership.write_text("previous\n")
@@ -237,7 +238,7 @@ def test_ownership_publication_failure_restores_mixed_or_absent_roots(
     install_fixture: tuple[Path, dict[str, str]], existing: bool
 ) -> None:
     script, env = install_fixture
-    skills = Path(env["NPM_ROOT"]) / "openclaw/skills"
+    skills = Path(env["HOME"]) / ".openclaw/skills"
     if existing:
         prepare_previous_skills(skills)
         (skills / "gog-calendar").unlink()
@@ -273,7 +274,7 @@ def test_ownership_publication_failure_restores_mixed_or_absent_roots(
 
 def test_snapshot_failure_does_not_mutate_destination(install_fixture: tuple[Path, dict[str, str]]) -> None:
     script, env = install_fixture
-    skills = Path(env["NPM_ROOT"]) / "openclaw/skills"
+    skills = Path(env["HOME"]) / ".openclaw/skills"
     prepare_previous_skills(skills)
     install_fault_wrapper(script, "cp")
     result = subprocess.run(
@@ -288,7 +289,7 @@ def test_snapshot_failure_does_not_mutate_destination(install_fixture: tuple[Pat
 
 def test_failed_restoration_retains_backup_and_reports_path(install_fixture: tuple[Path, dict[str, str]]) -> None:
     script, env = install_fixture
-    skills = Path(env["NPM_ROOT"]) / "openclaw/skills"
+    skills = Path(env["HOME"]) / ".openclaw/skills"
     prepare_previous_skills(skills)
     install_fault_wrapper(script, "cp")
     result = subprocess.run(
@@ -306,7 +307,7 @@ def test_failed_restoration_retains_backup_and_reports_path(install_fixture: tup
 
 def test_successful_rerun_replaces_previous_installation(install_fixture: tuple[Path, dict[str, str]]) -> None:
     script, env = install_fixture
-    skills = Path(env["NPM_ROOT"]) / "openclaw/skills"
+    skills = Path(env["HOME"]) / ".openclaw/skills"
     prepare_previous_skills(skills)
     for _ in range(2):
         result = subprocess.run(["sh", str(script), "--archive-file", env["ARCHIVE"]],
@@ -348,7 +349,7 @@ def test_overridden_pins_select_archive_and_digest(install_fixture: tuple[Path, 
     args = ["--archive-file", str(archive)] if mode == "local" else []
     result = run_installer(script, env | {"ARCHIVE": str(archive), COMMIT_KEY: OTHER_COMMIT, SHA_KEY: digest}, *args)
     assert result.returncode == 0, result.stderr
-    assert (Path(env["NPM_ROOT"]) / "openclaw/skills/gog/SKILL.md").read_text() == "gog upstream\n"
+    assert (Path(env["HOME"]) / ".openclaw/skills/gog/SKILL.md").read_text() == "gog upstream\n"
     if mode == "download":
         assert Path(env["CURL_LOG"]).read_text().strip().endswith(f"/tar.gz/{OTHER_COMMIT}")
     else:
@@ -368,7 +369,7 @@ def test_default_pins_apply_when_unset_or_empty(install_fixture: tuple[Path, dic
     assert result.returncode != 0  # the default digest rejects the fixture archive
     assert "FAILED" in result.stderr or "did NOT match" in result.stderr
     assert Path(env["CURL_LOG"]).read_text().strip().endswith(f"/tar.gz/{COMMIT}")
-    assert (Path(env["NPM_ROOT"]) / "openclaw/skills/gog/stale").read_text() == "old"
+    assert (Path(env["HOME"]) / ".openclaw/skills/gog/stale").read_text() == "old"
 
 
 def test_partial_resolution_resolves_each_pin_independently(install_fixture: tuple[Path, dict[str, str]]) -> None:
@@ -402,7 +403,7 @@ def test_malformed_commit_is_rejected_before_acquisition(
     assert not Path(env["CURL_LOG"]).exists()
     assert not (script.parent / "cp.log").exists()
     assert not marker.exists()
-    assert (Path(env["NPM_ROOT"]) / "openclaw/skills/gog/stale").read_text() == "old"
+    assert (Path(env["HOME"]) / ".openclaw/skills/gog/stale").read_text() == "old"
     assert not list(Path(env["TMPDIR"]).iterdir())
 
 
@@ -417,7 +418,7 @@ def test_wrong_digest_is_rejected_before_extraction_or_mutation(
     result = run_installer(script, env | {SHA_KEY: digest}, *args)
     assert result.returncode != 0
     assert not marker.exists()
-    skills = Path(env["NPM_ROOT"]) / "openclaw/skills"
+    skills = Path(env["HOME"]) / ".openclaw/skills"
     assert (skills / "gog/stale").read_text() == "old"
     assert not (skills / "gog-calendar").exists()
     assert not list(Path(env["TMPDIR"]).iterdir())
