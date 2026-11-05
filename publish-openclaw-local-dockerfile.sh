@@ -6,7 +6,7 @@
 #
 # Usage:
 #   DOCKERHUB_NAMESPACE=youruser ./publish-openclaw-local-dockerfile.sh
-#   OPENCLAW_PUBLISH_IMAGE=youruser/openclaw IMAGE_TAG=2026.10.10 ./publish-openclaw-local-dockerfile.sh
+#   OPENCLAW_PUBLISH_IMAGE=youruser/openclaw IMAGE_TAG=2026.11.1 ./publish-openclaw-local-dockerfile.sh
 #   PUSH_LATEST=1 DOCKERHUB_NAMESPACE=youruser ./publish-openclaw-local-dockerfile.sh
 #
 # Environment (set in .env or on the command line):
@@ -36,8 +36,8 @@ if [ -f "$ENV_FILE" ]; then
     set +a
 fi
 
-OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.10.10}"
-OPENCLAW_SHA256="${OPENCLAW_SHA256:-sha256:e811c18281812a409e29a681ada7faf7100560020e144fbdf18889fab2c7cf06}"
+OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.11.1}"
+OPENCLAW_SHA256="${OPENCLAW_SHA256:-sha256:611282534d576e12f10b0ac5a1ac0d2825aac360637e92815a56eb71fb5a0301}"
 GOGCLI_VERSION="${GOGCLI_VERSION:-0.47.1}"
 GOGCLI_AMD64_SHA256="${GOGCLI_AMD64_SHA256:-sha256:279bc3a03c1919d774e268ef229949f45b753a0e21257f9fb315b05be7a40ea9}"
 GOGCLI_ARM64_SHA256="${GOGCLI_ARM64_SHA256:-sha256:c677ac6abf5e187e987a87fe1b588f454b002a7d7019de81b9e8db02e9e902b6}"
