@@ -194,7 +194,8 @@ def assert_gone(pids: list[int]) -> None:
 
 
 def exercise_timeout(script: Path, env: dict[str, str]) -> None:
-    env.update({POLICY_KEYS[0]: "0.5", POLICY_KEYS[1]: "0.1"})
+    # The deadline includes interpreter startup and the actor's fork/readiness handshake.
+    env.update({POLICY_KEYS[0]: "2", POLICY_KEYS[1]: "0.1"})
     child_marker = Path(env["PROBE_READY"]).parent / "delegated"
     with validator_process(script, env, "/bin/sh", "-c", f'touch {shlex.quote(str(child_marker))}') as (process, ready):
         pids = readiness(ready)
