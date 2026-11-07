@@ -16,8 +16,8 @@ esac
 probe_dir=${validator_path%/*}
 . "$probe_dir/startup-probe.sh"
 
-if ! probe_run python3 -B "$probe_dir/installed-assets.py" verify --component linkup --inventory-dir /usr/local/share/openclaw-integrity --skills-root "$HOME/.openclaw/skills"; then
-    printf '%s\n' 'Installed assets failed verification: linkup' >&2
+if ! probe_run python3 -B "$probe_dir/installed-assets.py" verify --component tavily --inventory-dir /usr/local/share/openclaw-integrity --skills-root "$HOME/.openclaw/skills"; then
+    printf '%s\n' 'Installed assets failed verification: tavily' >&2
     exit 1
 fi
 
@@ -27,7 +27,7 @@ fail() {
 }
 
 skills="$HOME/.openclaw/skills"
-for name in linkup-search linkup-fetch; do
+for name in tavily-search tavily-crawl; do
     skill="$skills/$name"
     file="$skill/SKILL.md"
     if [ ! -f "$file" ] || [ ! -r "$file" ] || [ ! -s "$file" ] || ! probe_capture awk -v name="$name" '
@@ -54,7 +54,7 @@ import sys
 
 try:
     env = json.loads(sys.argv[1], parse_constant=int)["openclaw"]["requires"]["env"]
-    valid = isinstance(env, list) and all(isinstance(item, str) for item in env) and {"LINKUP_API_BASE", "LINKUP_PROXY_TOKEN"} <= set(env)
+    valid = isinstance(env, list) and all(isinstance(item, str) for item in env) and {"TAVILY_API_BASE", "TAVILY_API_KEY"} <= set(env)
 except (ValueError, KeyError, TypeError):
     valid = False
 sys.exit(not valid)
@@ -62,8 +62,8 @@ sys.exit(not valid)
         fail "$name"
     fi
     case "$name" in
-        linkup-search) references="LINKUP_AGENT_QUERY_MENTAL_MODEL.md LINKUP_PROMPT_OPTIMIZER_KNOWLEDGE.md LINKUP_API_REFERENCE.md" ;;
-        linkup-fetch) references="LINKUP_API_REFERENCE.md" ;;
+        tavily-search) references="TAVILY_SEARCH_API_REFERENCE.md" ;;
+        tavily-crawl) references="TAVILY_CRAWL_API_REFERENCE.md" ;;
     esac
     for reference in $references; do
         file="$skill/references/$reference"

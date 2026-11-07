@@ -109,9 +109,20 @@ RUN --mount=type=bind,from=openclaw_assets,target=/staged \
         staged) sh /tmp/install-humanizer.sh --archive-file /staged/common/humanizer.tar.gz ;; \
         *) exit 2 ;; \
     esac && rm /tmp/install-humanizer.sh
-COPY docker/openclaw/linkup-skills/ /tmp/linkup-skills/
-COPY docker/openclaw/install-linkup.sh /tmp/install-linkup.sh
-RUN sh /tmp/install-linkup.sh && rm /tmp/install-linkup.sh
+COPY docker/openclaw/humanizer-soul.md /tmp/humanizer-soul.md
+COPY docker/openclaw/officecli-soul.md /tmp/officecli-soul.md
+COPY docker/openclaw/soul-guardian-soul.md /tmp/soul-guardian-soul.md
+COPY docker/openclaw/tavily-soul.md /tmp/tavily-soul.md
+RUN template="$(npm root -g)/openclaw/docs/reference/templates/SOUL.md" \
+    && test -s "$template" \
+    && install -d -m 0755 /usr/local/share/openclaw \
+    && cat /tmp/humanizer-soul.md /tmp/officecli-soul.md /tmp/soul-guardian-soul.md /tmp/tavily-soul.md > /usr/local/share/openclaw/skills-soul.md \
+    && chmod 0644 /usr/local/share/openclaw/skills-soul.md \
+    && cat /usr/local/share/openclaw/skills-soul.md >> "$template" \
+    && rm /tmp/humanizer-soul.md /tmp/officecli-soul.md /tmp/soul-guardian-soul.md /tmp/tavily-soul.md
+COPY docker/openclaw/tavily-skills/ /tmp/tavily-skills/
+COPY docker/openclaw/install-tavily.sh /tmp/install-tavily.sh
+RUN sh /tmp/install-tavily.sh && rm /tmp/install-tavily.sh
 COPY docker/openclaw/installed-assets.py /usr/local/bin/installed-assets.py
 RUN python3 /usr/local/bin/installed-assets.py create \
     --skills-root "$HOME/.openclaw/skills" \
@@ -121,14 +132,14 @@ COPY docker/openclaw/validate-gogcli.sh /usr/local/bin/validate-gogcli.sh
 RUN chmod 0755 /usr/local/bin/validate-gogcli.sh
 COPY docker/openclaw/validate-officecli.sh /usr/local/bin/validate-officecli.sh
 COPY docker/openclaw/validate-soul-guardian.sh /usr/local/bin/validate-soul-guardian.sh
-COPY docker/openclaw/validate-linkup.sh /usr/local/bin/validate-linkup.sh
+COPY docker/openclaw/validate-tavily.sh /usr/local/bin/validate-tavily.sh
 COPY docker/openclaw/validate-humanizer.sh /usr/local/bin/validate-humanizer.sh
 COPY docker/openclaw/startup-probe.sh /usr/local/bin/startup-probe.sh
 COPY docker/openclaw/startup-probe.py /usr/local/bin/startup-probe.py
 COPY docker/openclaw/bootstrap_event.py /usr/local/bin/bootstrap_event.py
 COPY docker/openclaw/bootstrap-agent-container.py /usr/local/bin/bootstrap-agent-container.py
-RUN chmod 0755 /usr/local/bin/validate-officecli.sh /usr/local/bin/validate-soul-guardian.sh /usr/local/bin/validate-linkup.sh /usr/local/bin/validate-humanizer.sh /usr/local/bin/startup-probe.sh /usr/local/bin/startup-probe.py /usr/local/bin/bootstrap_event.py /usr/local/bin/bootstrap-agent-container.py
+RUN chmod 0755 /usr/local/bin/validate-officecli.sh /usr/local/bin/validate-soul-guardian.sh /usr/local/bin/validate-tavily.sh /usr/local/bin/validate-humanizer.sh /usr/local/bin/startup-probe.sh /usr/local/bin/startup-probe.py /usr/local/bin/bootstrap_event.py /usr/local/bin/bootstrap-agent-container.py
 
 USER node
-ENTRYPOINT ["tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh", "/usr/local/bin/validate-officecli.sh", "/usr/local/bin/validate-soul-guardian.sh", "/usr/local/bin/validate-linkup.sh", "/usr/local/bin/validate-humanizer.sh", "/usr/local/bin/bootstrap-agent-container.py"]
+ENTRYPOINT ["tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh", "/usr/local/bin/validate-officecli.sh", "/usr/local/bin/validate-soul-guardian.sh", "/usr/local/bin/validate-tavily.sh", "/usr/local/bin/validate-humanizer.sh", "/usr/local/bin/bootstrap-agent-container.py"]
 CMD ["openclaw", "gateway"]

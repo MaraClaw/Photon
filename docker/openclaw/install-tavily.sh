@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-source=/tmp/linkup-skills
-stage=$(mktemp -d "${TMPDIR:-/tmp}/linkup.XXXXXXXX")
+source=/tmp/tavily-skills
+stage=$(mktemp -d "${TMPDIR:-/tmp}/tavily.XXXXXXXX")
 cleanup() {
     status=$?
     trap - EXIT
@@ -19,7 +19,7 @@ cleanup() {
             fi
         done
         if [ "$failed" -ne 0 ]; then
-            printf 'Linkup restoration failed; backups retained at %s\n' "$stage" >&2
+            printf 'Tavily restoration failed; backups retained at %s\n' "$stage" >&2
             exit 1
         fi
     fi
@@ -39,16 +39,16 @@ import sys
 with open(sys.argv[1], encoding="utf-8") as manifest:
     names = json.load(manifest)["skills"]
 if not isinstance(names, list) or not names or any(
-    not isinstance(name, str) or not re.fullmatch(r"linkup-[a-z0-9]+(?:-[a-z0-9]+)*", name)
+    not isinstance(name, str) or not re.fullmatch(r"tavily-[a-z0-9]+(?:-[a-z0-9]+)*", name)
     for name in names
 ) or len(set(names)) != len(names):
-    sys.exit("invalid Linkup skills manifest")
+    sys.exit("invalid Tavily skills manifest")
 print("\n".join(names))
 PY
 while IFS= read -r name; do
     if [ ! -d "$source/$name" ] || [ -L "$source/$name" ] ||
        [ ! -f "$source/$name/SKILL.md" ] || [ ! -s "$source/$name/SKILL.md" ]; then
-        printf 'invalid Linkup skill payload: %s\n' "$name" >&2
+        printf 'invalid Tavily skill payload: %s\n' "$name" >&2
         exit 1
     fi
     cp -a -- "$source/$name" "$stage/incoming/$name"
@@ -67,7 +67,7 @@ for directory, directories, files in os.walk(root, followlinks=False):
             try:
                 path.resolve(strict=True).relative_to(root)
             except (OSError, RuntimeError, ValueError):
-                sys.exit(f"invalid Linkup payload symlink: {path}")
+                sys.exit(f"invalid Tavily payload symlink: {path}")
 PY
 destination="$HOME/.openclaw/skills"
 install -d -m 0755 "$destination"

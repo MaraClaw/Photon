@@ -1,0 +1,10 @@
+{
+  "skills": [
+    "tavily-search",
+    "tavily-crawl"
+  ],
+  "default_skills": [
+    "tavily-search",
+    "tavily-crawl"
+  ]
+}

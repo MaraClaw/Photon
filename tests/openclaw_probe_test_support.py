@@ -28,7 +28,7 @@ def prepare_integrity(root: Path, skills: Path, env: dict[str, str], script: Pat
         binary = binaries / name
         if not binary.exists():
             binary.write_text("fixture\n")
-    for name in ("gog", "crabbox", "officecli", "soul-guardian", "linkup-search", "linkup-fetch", "humanizer"):
+    for name in ("gog", "crabbox", "officecli", "soul-guardian", "tavily-search", "tavily-crawl", "humanizer"):
         directory = skills / name
         directory.mkdir(parents=True, exist_ok=True)
         if not any(directory.iterdir()):

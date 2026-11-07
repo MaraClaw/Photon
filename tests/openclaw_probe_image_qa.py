@@ -13,7 +13,7 @@ import tempfile
 import threading
 
 
-VALIDATORS = ("gogcli", "officecli", "soul-guardian", "linkup")
+VALIDATORS = ("gogcli", "officecli", "soul-guardian", "tavily")
 SOURCE = Path("/usr/local/bin")
 
 

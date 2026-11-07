@@ -65,7 +65,7 @@ def test_image_installs_pinned_cli_and_runs_validator_as_entrypoint() -> None:
     assert json.loads(entrypoint.removeprefix("ENTRYPOINT ")) == [
         "tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh",
         "/usr/local/bin/validate-officecli.sh", "/usr/local/bin/validate-soul-guardian.sh",
-        "/usr/local/bin/validate-linkup.sh", "/usr/local/bin/validate-humanizer.sh", "/usr/local/bin/bootstrap-agent-container.py",
+        "/usr/local/bin/validate-tavily.sh", "/usr/local/bin/validate-humanizer.sh", "/usr/local/bin/bootstrap-agent-container.py",
     ]
     assert json.loads(command.removeprefix("CMD ")) == ["openclaw", "gateway"]
     assert "COPY docker/openclaw/install-officecli.sh /tmp/install-officecli.sh" in lines
@@ -73,26 +73,26 @@ def test_image_installs_pinned_cli_and_runs_validator_as_entrypoint() -> None:
     assert 'staged) sh /tmp/install-officecli.sh --binary-file "/staged/linux-${TARGETARCH}/officecli" --skill-file /staged/common/officecli-SKILL.md ;;' in source
     assert "COPY docker/openclaw/validate-gogcli.sh /usr/local/bin/validate-gogcli.sh" in lines
     assert "RUN chmod 0755 /usr/local/bin/validate-gogcli.sh" in lines
-    for name in ("officecli", "soul-guardian", "linkup", "humanizer"):
+    for name in ("officecli", "soul-guardian", "tavily", "humanizer"):
         assert f"COPY docker/openclaw/validate-{name}.sh /usr/local/bin/validate-{name}.sh" in lines
         assert f"!docker/openclaw/validate-{name}.sh" in (DOCKERFILE.parent / ".dockerignore").read_text().splitlines()
     chmod = next(line for line in lines if line.startswith("RUN chmod 0755 /usr/local/bin/validate-officecli.sh"))
-    assert {f"/usr/local/bin/validate-{name}.sh" for name in ("officecli", "soul-guardian", "linkup", "humanizer")} <= set(shlex.split(chmod))
-    assert "COPY docker/openclaw/linkup-skills/ /tmp/linkup-skills/" in lines
-    assert "COPY docker/openclaw/install-linkup.sh /tmp/install-linkup.sh" in lines
-    assert "RUN sh /tmp/install-linkup.sh && rm /tmp/install-linkup.sh" in lines
-    assert '!docker/openclaw/install-linkup.sh' in (DOCKERFILE.parent / '.dockerignore').read_text().splitlines()
-    assert '!docker/openclaw/linkup-skills/' in (DOCKERFILE.parent / '.dockerignore').read_text().splitlines()
-    assert '!docker/openclaw/linkup-skills/**' in (DOCKERFILE.parent / '.dockerignore').read_text().splitlines()
-    installer = (DOCKERFILE.parent / 'docker/openclaw/install-linkup.sh').read_text()
+    assert {f"/usr/local/bin/validate-{name}.sh" for name in ("officecli", "soul-guardian", "tavily", "humanizer")} <= set(shlex.split(chmod))
+    assert "COPY docker/openclaw/tavily-skills/ /tmp/tavily-skills/" in lines
+    assert "COPY docker/openclaw/install-tavily.sh /tmp/install-tavily.sh" in lines
+    assert "RUN sh /tmp/install-tavily.sh && rm /tmp/install-tavily.sh" in lines
+    assert '!docker/openclaw/install-tavily.sh' in (DOCKERFILE.parent / '.dockerignore').read_text().splitlines()
+    assert '!docker/openclaw/tavily-skills/' in (DOCKERFILE.parent / '.dockerignore').read_text().splitlines()
+    assert '!docker/openclaw/tavily-skills/**' in (DOCKERFILE.parent / '.dockerignore').read_text().splitlines()
+    installer = (DOCKERFILE.parent / 'docker/openclaw/install-tavily.sh').read_text()
     assert installer.startswith('#!/bin/sh\nset -eu\n')
     assert 'destination="$HOME/.openclaw/skills"' in installer
     assert 'install -d -m 0755 "$destination"' in installer
-    assert 'source=/tmp/linkup-skills' in installer
+    assert 'source=/tmp/tavily-skills' in installer
     assert '"$source/manifest.json"' in installer
     assert 'cp -a -- "$stage/incoming/$name" "$destination/$name"' in installer
     assert 'chmod -R a+rX "$stage/incoming/$name"' in installer
-    assert '"$destination"/linkup-*' not in installer
+    assert '"$destination"/tavily-*' not in installer
     assert 'rm -rf -- "$source"' in installer
     path = next(line for line in lines if line.startswith("ENV PATH="))
     assert "/usr/local/bin" in path.split()[1].removeprefix("PATH=").split(":")
@@ -133,7 +133,7 @@ def test_image_inventory_is_created_after_installers_before_node() -> None:
     assert "!docker/openclaw/installed-assets.py" in allowed
     assert "COPY docker/openclaw/installed-assets.py /usr/local/bin/installed-assets.py" in source
     inventory = source.index("RUN python3 /usr/local/bin/installed-assets.py create")
-    assert source.index("RUN sh /tmp/install-linkup.sh") < inventory < source.index("USER node")
+    assert source.index("RUN sh /tmp/install-tavily.sh") < inventory < source.index("USER node")
     assert source.index("sh /tmp/install-humanizer.sh") < inventory
     assert "!docker/openclaw/install-humanizer.sh" in allowed
     assert '--skills-root "$HOME/.openclaw/skills"' in source[inventory:]

@@ -63,7 +63,7 @@ def main() -> None:
             print(
                 docker.run(
                     image,
-                    ["sh", "-c", 'for validator in gogcli officecli soul-guardian linkup humanizer; do "/usr/local/bin/validate-$validator.sh" true || exit; done'],
+                    ["sh", "-c", 'for validator in gogcli officecli soul-guardian tavily humanizer; do "/usr/local/bin/validate-$validator.sh" true || exit; done'],
                     name=container,
                     remove=True,
                     networks=["none"],
