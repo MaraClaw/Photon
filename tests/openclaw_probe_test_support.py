@@ -131,7 +131,7 @@ def install_hang(root: Path, env: dict[str, str], target: Path, *, python_probe:
     command = f"exec {shlex.quote(sys.executable)} {shlex.quote(str(actor))}"
     if python_probe:
         target.unlink(missing_ok=True)
-        pattern = "-c" if python_probe == "compile" else "*soul_guardian.py"
+        pattern = "*installed-assets.py" if python_probe == "integrity" else "*soul_guardian.py"
         target.write_text(
             f'#!/bin/sh\nif [ "$1" = "-B" ]; then\n'
             f'  case "$2" in {pattern}) {command} ;; esac\nfi\n'
@@ -227,7 +227,7 @@ def exercise_invalid_policy(script: Path, env: dict[str, str], key: str, value: 
 
 
 def exercise_final_child(script: Path, env: dict[str, str]) -> None:
-    env.update({POLICY_KEYS[0]: "0.5", POLICY_KEYS[1]: "0.1"})
+    env.update({POLICY_KEYS[0]: "2", POLICY_KEYS[1]: "0.1"})
     fifo = Path(env["PROBE_READY"])
     env["TMPDIR"] = str(fifo.parent)
     child = fifo.parent / "long_child.py"
@@ -248,7 +248,7 @@ def exercise_final_child(script: Path, env: dict[str, str]) -> None:
         assert pid == process.pid
         assert received == arguments
         with pytest.raises(subprocess.TimeoutExpired):
-            process.wait(timeout=1.6)
+            process.wait(timeout=2.5)
         processes = subprocess.run(["ps", "-eo", "ppid=,pid="], capture_output=True, text=True, timeout=5, check=True)
         assert not [line for line in processes.stdout.splitlines() if int(line.split()[0]) == process.pid]
         assert not list(fifo.parent.glob("openclaw-probe.*"))

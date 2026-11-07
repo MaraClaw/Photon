@@ -24,7 +24,6 @@ REFERENCES = {
     "tavily-crawl": ("TAVILY_CRAWL_API_REFERENCE.md",),
 }
 REQUIRED_ENV = {"TAVILY_API_BASE", "TAVILY_API_KEY"}
-VALID_METADATA = 'metadata: {"openclaw":{"requires":{"env":["TAVILY_API_BASE","TAVILY_API_KEY"]}}}'
 
 
 @pytest.mark.parametrize("local", [False, True])
@@ -111,22 +110,14 @@ def test_valid_installation_executes_command_with_original_arguments_and_status(
 
 
 @pytest.mark.parametrize("name", NAMES)
-@pytest.mark.parametrize("failure", ["missing", "empty", "malformed", "wrong-name", "empty-description", "invalid-description", "null-description"])
+@pytest.mark.parametrize("failure", ["missing", "empty"])
 def test_invalid_skill_blocks_command(installation: tuple[Path, dict[str, str]], name: str, failure: str) -> None:
     skills, env = installation
     file = skills / name / "SKILL.md"
     if failure == "missing":
         file.unlink()
-    elif failure == "empty":
-        file.write_text("")
-    elif failure == "malformed":
-        file.write_text(f"---\nname: {name}\ndescription: broken\n{VALID_METADATA}\n")
-    elif failure == "wrong-name":
-        file.write_text(f"---\nname: wrong\ndescription: description\n{VALID_METADATA}\n---\n")
     else:
-        description = {"empty-description": "# missing", "invalid-description": "[", "null-description": "null"}[failure]
-        file.write_text(f"---\nname: {name}\ndescription: {description}\n{VALID_METADATA}\n---\n")
-    if failure != "missing":
+        file.write_text("")
         rebaseline(env)
     result = subprocess.run(["/bin/sh", env["VALIDATOR"], "/bin/false"], env=env, capture_output=True, text=True, check=False)
     assert result.returncode == 1
@@ -134,37 +125,13 @@ def test_invalid_skill_blocks_command(installation: tuple[Path, dict[str, str]],
 
 
 @pytest.mark.parametrize("name", NAMES)
-@pytest.mark.parametrize("metadata", [
-    "",
-    'metadata: {broken}',
-    'metadata: {"extra":NaN,"openclaw":{"requires":{"env":["TAVILY_API_BASE","TAVILY_API_KEY"]}}}',
-    'metadata: {}',
-    'metadata: {"openclaw":{"requires":{"env":"TAVILY_API_BASE TAVILY_API_KEY"}}}',
-    'metadata: {"openclaw":{"requires":{"env":["TAVILY_API_BASE"]}}}',
-    'metadata: {"openclaw":{"requires":{"env":["TAVILY_API_KEY"]}}}',
-    'metadata: {"openclaw":{"requires":{"env":["TAVILY_API_BASE", "TAVILY_API_KEY", 1]}}}',
-    'metadata: {"openclaw":{"requires":{"env":["TAVILY_API_BASE", "TAVILY_API_KEY"]}}}\nmetadata: {}',
-])
-def test_invalid_metadata_blocks_command(
-    installation: tuple[Path, dict[str, str]], name: str, metadata: str,
-) -> None:
+def test_tampered_skill_blocks_command_without_rebaseline(installation: tuple[Path, dict[str, str]], name: str) -> None:
     skills, env = installation
     file = skills / name / "SKILL.md"
-    file.write_text(f"---\nname: {name}\ndescription: description\n{metadata + chr(10) if metadata else ''}---\n")
-    rebaseline(env)
-    result = subprocess.run(["/bin/sh", env["VALIDATOR"], sys.executable, "-c", "pass"], env=env, capture_output=True, text=True, check=False)
+    file.write_text(file.read_text().replace("description: ", "description: Tampered ", 1))
+    result = subprocess.run(["/bin/sh", env["VALIDATOR"], "/bin/false"], env=env, capture_output=True, text=True, check=False)
     assert result.returncode == 1
-    assert result.stderr == f"Required skill failed verification: {name}\n"
-
-
-def test_valid_metadata_with_additional_env_executes_command(installation: tuple[Path, dict[str, str]]) -> None:
-    skills, env = installation
-    file = skills / NAMES[0] / "SKILL.md"
-    file.write_text('---\nname: tavily-search\ndescription: description\nmetadata: {"openclaw": {"requires": {"env": ["OTHER", "TAVILY_API_KEY", "TAVILY_API_BASE"]}}}\n---\n')
-    rebaseline(env)
-    result = subprocess.run(["/bin/sh", env["VALIDATOR"], sys.executable, "-c", "pass"], env=env, capture_output=True, text=True, check=False)
-    assert result.returncode == 0
-    assert result.stderr == ""
+    assert result.stderr == "Installed assets failed verification: tavily\n"
 
 
 @pytest.mark.parametrize("name,reference", [(name, ref) for name, refs in REFERENCES.items() for ref in refs])
@@ -192,11 +159,10 @@ def test_home_redirect_blocks_command(installation: tuple[Path, dict[str, str]],
     assert result.stderr == "Installed assets failed verification: tavily\n"
 
 
-@pytest.mark.parametrize("probe", ["awk", "python3"])
-def test_tavily_hanging_probe_times_out(installation: tuple[Path, dict[str, str]], probe: str) -> None:
+def test_tavily_hanging_probe_times_out(installation: tuple[Path, dict[str, str]]) -> None:
     skills, env = installation
     root = skills.parents[2]
-    install_hang(root, env, root / "bin" / probe, python_probe="compile" if probe == "python3" else "")
+    install_hang(root, env, root / "bin/python3", python_probe="integrity")
     exercise_timeout(Path(env["VALIDATOR"]), env)
 
 
@@ -205,7 +171,7 @@ def test_tavily_hanging_probe_times_out(installation: tuple[Path, dict[str, str]
 def test_invalid_policy_prevents_tavily_probes(installation: tuple[Path, dict[str, str]], key: str, value: str) -> None:
     skills, env = installation
     root = skills.parents[2]
-    install_hang(root, env, root / "bin/awk")
+    install_hang(root, env, root / "bin/python3", python_probe="integrity")
     exercise_invalid_policy(Path(env["VALIDATOR"]), env, key, value)
 
 
@@ -213,7 +179,7 @@ def test_invalid_policy_prevents_tavily_probes(installation: tuple[Path, dict[st
 def test_tavily_signal_cleans_parsing_group(installation: tuple[Path, dict[str, str]], signum: int) -> None:
     skills, env = installation
     root = skills.parents[2]
-    install_hang(root, env, root / "bin/awk")
+    install_hang(root, env, root / "bin/python3", python_probe="integrity")
     exercise_signal(Path(env["VALIDATOR"]), env, signum)
 
 
@@ -222,7 +188,7 @@ def test_tavily_restart_rechecks_hanging_probe(installation: tuple[Path, dict[st
     root = skills.parents[2]
     assert subprocess.run(["/bin/sh", env["VALIDATOR"], "/bin/sh", "-c", ":"], env=env, timeout=5, check=False).returncode == 0
     (root / ".tavily-checked").touch()
-    install_hang(root, env, root / "bin/awk")
+    install_hang(root, env, root / "bin/python3", python_probe="integrity")
     exercise_timeout(Path(env["VALIDATOR"]), env)
 
 

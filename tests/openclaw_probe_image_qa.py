@@ -13,16 +13,17 @@ import tempfile
 import threading
 
 
-VALIDATORS = ("gogcli", "officecli", "soul-guardian", "tavily")
+VALIDATORS = ("gogcli", "officecli", "soul-guardian", "tavily", "humanizer")
 SOURCE = Path("/usr/local/bin")
 
 
 def fake_probe() -> None:
     Path(os.environ["PROBE_MARKER"]).touch()
-    mode = os.environ.get("PROBE_MODE", "") if Path(sys.argv[0]).name == os.environ.get("PROBE_TARGET") else ""
+    name = Path(sys.argv[0]).name
+    mode = os.environ.get("PROBE_MODE", "") if name == os.environ.get("PROBE_TARGET") else ""
     if not mode:
-        if Path(sys.argv[0]).name == "npm":
-            print(os.environ["REAL_NPM_ROOT"])
+        if name == "probe-python":
+            os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
         return
     parent_pid = os.getpid()
     read_fd, write_fd = os.pipe()
@@ -49,8 +50,7 @@ def fake_probe() -> None:
 def prepare(directory: Path) -> tuple[dict[str, Path], dict[str, str]]:
     binary_dir = directory / "bin with spaces"
     binary_dir.mkdir()
-    npm_root = subprocess.check_output(["npm", "root", "-g"], text=True, timeout=60).strip()
-    for name in ("gog", "officecli", "npm"):
+    for name in ("gog", "officecli", "probe-python"):
         executable = binary_dir / name
         executable.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{__file__}" --fake "$0" "$@"\n')
         executable.chmod(0o755)
@@ -61,12 +61,12 @@ def prepare(directory: Path) -> tuple[dict[str, Path], dict[str, str]]:
         text = (SOURCE / f"validate-{name}.sh").read_text()
         for binary in ("gog", "officecli"):
             text = text.replace(f"/usr/local/bin/{binary}", str(binary_dir / binary))
+        text = text.replace("probe_run python3 ", f'probe_run "{binary_dir / "probe-python"}" ')
         script = directory / f"validate-{name}.sh"
         script.write_text(text)
         scripts[name] = script
     env = os.environ | {
         "PATH": f'{binary_dir}:{os.environ["PATH"]}',
-        "REAL_NPM_ROOT": npm_root,
         "PROBE_MARKER": str(directory / "probe-marker"),
         "OPENCLAW_PROBE_GRACE_SECONDS": "0.2",
     }
@@ -86,7 +86,7 @@ def direct_failure(script: Path, env: dict[str, str], signum: int | None, *, ear
         "READY_FIFO": str(fifo),
         "PID_FILE": str(pid_file),
         "PROBE_MODE": "early" if early else "hang",
-        "PROBE_TARGET": {"validate-gogcli.sh": "gog", "validate-officecli.sh": "officecli"}.get(script.name, "npm"),
+        "PROBE_TARGET": {"validate-gogcli.sh": "gog", "validate-officecli.sh": "officecli"}.get(script.name, "probe-python"),
         "OPENCLAW_PROBE_TIMEOUT_SECONDS": "15" if signum is None else "30",
     }
     process = subprocess.Popen(
