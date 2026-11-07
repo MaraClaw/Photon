@@ -1,6 +1,6 @@
 # Photon
 
-Photon builds and publishes MaraClaw's OpenClaw guest image for linux/amd64 and linux/arm64. The image installs pinned gogcli and OfficeCLI at build time and bundles the OfficeCLI skill and all 32 upstream gogcli skills in `/home/node/.openclaw/skills`. Google skills require appropriate Google credentials, authorization, and API access. The included `crabbox` skill is for maintainers and requires an external Crabbox installation and an appropriate repository checkout. Startup verifies both CLIs, the soul-guardian skill, and the two bundled Tavily skills without downloading or changing OpenClaw state or configuration. Tavily validation needs no credentials; actual requests use the authenticated MaraClaw engine proxy. If `GOG_KEYRING_PASSWORD_FILE` is set, `GOG_HOME` must also be set; the validator reads the password into the process environment and creates `GOG_HOME` with mode 0700.
+Photon builds and publishes MaraClaw's OpenClaw guest image for linux/amd64 and linux/arm64. The image installs pinned gogcli and OfficeCLI at build time and bundles the OfficeCLI skill and all 32 upstream gogcli skills in `/home/node/.openclaw/skills`. Google skills require appropriate Google credentials, authorization, and API access. The included `crabbox` skill is for maintainers and requires an external Crabbox installation and an appropriate repository checkout. Startup verifies both CLIs, the soul-guardian skill, and the two bundled Tavily skills without downloading or changing OpenClaw state or configuration. Tavily validation needs no credentials; actual requests use the authenticated MaraClaw engine proxy. If `GOG_KEYRING_PASSWORD_FILE` is set, `GOG_HOME` must also be set; the validator reads the password into the process environment and creates `GOG_HOME` with mode 0700. `GOG_KEYRING_PASSWORD` is therefore inherited by the gateway and every process it starts; the MaraClaw engine relies on this. The file stays readable by the `node` user, so the export does not widen access for code already running as that user.
 
 Mount persistent state outside `/home/node/.openclaw` so it does not hide the image skills. MaraClaw uses `/home/node/custom-state`, sets `OPENCLAW_STATE_DIR` and `OPENCLAW_CONFIG_PATH` accordingly, and adds `/home/node/.openclaw/skills` to `skills.load.extraDirs`. These skills load as `openclaw-extra`; pinned OpenClaw's bundled `gog` takes precedence over the duplicate home-installed `gog`.
 
@@ -16,7 +16,7 @@ Runtime skill usage policy lives in `docker/openclaw/*-soul.md`. The image combi
 
 Each external validation probe has a 30-second deadline and a 2-second termination grace. Override these with `OPENCLAW_PROBE_TIMEOUT_SECONDS` and `OPENCLAW_PROBE_GRACE_SECONDS`; both must be positive decimal seconds (fractions are allowed, but empty, zero, negative, non-finite, whitespace and exponent forms are rejected before any probe). Invalid policy exits 2, timeout exits 124, and handled HUP, INT or TERM exits 128 plus the signal number. Probe output is suppressed; captured output and file-backed passwords are private and trailing newlines are stripped.
 
-The shared Python supervisor terminates the probe process group, escalates to KILL after the grace on timeout or cancellation, and reaps owned descendants on Linux. Residual group members are terminated on ordinary completion too. This covers non-daemonizing probes that stay in their process group, not escaped sessions or uninterruptible kernel waits. The final command is executed unchanged, outside the deadline, after supervision and capture files have been removed. Direct validator use requires POSIX sh, Python 3 with `waitid`/`WNOWAIT`, writable temporary storage, and both `startup-probe` helpers beside the validator; Linux also requires working `prctl` subreaper support. Darwin supports process-group termination for host tests; Linux is the descendant-reaping authority.
+The shared Python supervisor terminates the probe process group, escalates to KILL after the grace on timeout or cancellation, and reaps owned descendants on Linux. Residual group members are terminated on ordinary completion too, and the grace wait ends as soon as the group is gone. On Linux, descendants that left the group (for example with `setsid`) are still reaped: they receive TERM, then KILL after the grace, and the supervisor stops waiting for them after a second grace. Uninterruptible kernel waits are not covered. The final command is executed unchanged, outside the deadline, after supervision and capture files have been removed. Direct validator use requires POSIX sh, Python 3 with `waitid`/`WNOWAIT`, writable temporary storage, and both `startup-probe` helpers beside the validator; Linux also requires working `prctl` subreaper support. Darwin supports process-group termination for host tests; Linux is the descendant-reaping authority.
 
 ## Bootstrap completion event
 
@@ -24,7 +24,7 @@ The last entrypoint stage, `bootstrap-agent-container.py`, starts `openclaw gate
 
 ## Local build
 
-Copy `.env.example` to `.env` if you want project-local configuration. Both scripts change to the Photon directory and source `.env` by default; assignments in that file override inherited environment variables. Set `ENV_FILE` to an explicit path to source a different file, or to a nonexistent path to use only the process environment and script defaults.
+Copy `.env.example` to `.env` if you want project-local configuration. Both scripts change to the Photon directory and source `.env` by default; assignments in that file override inherited environment variables. Set `ENV_FILE` to an explicit path to source a different file, or to a nonexistent path to use only the process environment. Pin defaults live only in the `Dockerfile.openclaw` ARGs; the scripts forward a pin as a build argument only when it is set and nonempty, so `.env.example` lists them commented out as overrides.
 
 The local build loads one target (default `linux/arm64`) and defaults to `openclaw:local`. Its tag must match the engine's `MARACLAW_OPENCLAW_IMAGE` and it must be loaded on the same Docker daemon used by the worker. For example, with no overriding assignment in the selected env file:
 
@@ -32,7 +32,17 @@ The local build loads one target (default `linux/arm64`) and defaults to `opencl
 MARACLAW_OPENCLAW_IMAGE=openclaw:2026.11.1 ./build-openclaw-local-dockerfile.sh
 ```
 
-Set `DOCKER_PLATFORM=linux/amd64` for the other supported target. Keep the OpenClaw version and checksum aligned with the intended image tag.
+Set `DOCKER_PLATFORM=linux/amd64` for the other supported target. If you override a pin, override its paired version and checksum together.
+
+OpenClaw is installed with `npm ci` from the committed `docker/openclaw/openclaw-package/package-lock.json` into `/opt/openclaw`, and `/usr/local/bin/openclaw` links to it. The build fails if `OPENCLAW_VERSION` differs from the locked openclaw version, and it checks the OpenClaw tarball against both `OPENCLAW_SHA256` and the lock's integrity. To bump OpenClaw, update the version in `package.json` and `Dockerfile.openclaw`, delete the lock, and regenerate it:
+
+```bash
+docker run --rm --platform linux/arm64 -v "$PWD/docker/openclaw/openclaw-package":/work -w /work --entrypoint sh \
+  nikolaik/python-nodejs:python3.15-nodejs26-slim@sha256:552fd665f95f93fbbba5d145807667ddbf3b62fd45d555541b62eed7310cfe19 \
+  -c 'npm install -g npm@12.2.1 && npm install --package-lock-only --install-strategy=shallow --ignore-scripts --allow-remote=all --no-audit --no-fund'
+```
+
+Debian packages are resolved from `snapshot.debian.org` at `DEBIAN_SNAPSHOT`, so the apt pins stay installable after security updates supersede them; the image keeps those snapshot sources. When bumping a package pin, move the snapshot to a timestamp where every pinned version exists for amd64 and arm64.
 
 ### Pre-staged auxiliary assets
 
@@ -51,7 +61,7 @@ linux-arm64/officecli
 
 The existing pinned digests are checked before an asset is extracted, installed, or executed. Missing or corrupt staged inputs fail without an online fallback. Buildx provides the directory as the named `openclaw_assets` build context, mounted read-only only during installation; it is not copied into the image or added to the default context. This mode covers auxiliary assets only: base images, apt packages and the OpenClaw npm package may still require network access.
 
-The image generates a root-owned installed-content inventory after installation. Each startup validator checks its own executables and skill trees against this image baseline, including additions, removals and relative symlink changes, before running component code. Validation is offline and runs on every invocation, including direct calls and restarts. It detects drift, not publisher authenticity, and cannot protect against root replacing both assets and inventory.
+The image generates a root-owned installed-content inventory after installation. Each startup validator checks its own executables and skill trees against this image baseline, including additions, removals and relative symlink changes, before running component code. Validation is offline and runs on every invocation, including direct calls and restarts. It detects drift, not publisher authenticity, and cannot protect against root replacing both assets and inventory. Skill content (Tavily `SKILL.md` frontmatter and `openclaw.requires.env`, soul-guardian `skill.json` and `onboard_state_dir.py`) is checked once at build time by `docker/openclaw/check-skills.py`, before the inventory is created; at startup the validators verify the inventory, file presence and non-emptiness, and run the tool smoke commands (`gog --version`, `officecli --version`, `soul_guardian.py --help`). Build-time installers share `docker/openclaw/install-common.sh`, which stages, verifies and backs up payloads and restores them if installation fails.
 
 ## Publish
 
@@ -61,14 +71,27 @@ After `docker login`, publish both architectures under one versioned tag:
 DOCKERHUB_NAMESPACE=youruser ./publish-openclaw-local-dockerfile.sh
 ```
 
-Alternatively set `OPENCLAW_PUBLISH_IMAGE`; `IMAGE_TAG` defaults to `OPENCLAW_VERSION`, and `PUSH_LATEST=1` also publishes `latest`. Values in the selected env file take precedence over these command-line environment assignments.
+Alternatively set `OPENCLAW_PUBLISH_IMAGE`; `IMAGE_TAG` defaults to `OPENCLAW_VERSION`, else to the Dockerfile's `ARG OPENCLAW_VERSION`, and `PUSH_LATEST=1` also publishes `latest`. The pushed manifest carries max-mode SLSA provenance and an SBOM attestation. Values in the selected env file take precedence over these command-line environment assignments.
+
+### Release
+
+Pushing a tag `openclaw-v<version>` (for example `openclaw-v2026.11.1`) runs the Photon Release workflow; `workflow_dispatch` from a tag ref works too. `<version>` must equal the Dockerfile's `ARG OPENCLAW_VERSION`, or the workflow fails before building. It needs the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` and the repository variable `DOCKERHUB_NAMESPACE`. It publishes `<namespace>/openclaw:<version>` and `:latest` for both architectures, then signs the manifest-list digest with cosign keyless (Sigstore, GitHub OIDC). Verify a release with:
+
+```bash
+cosign verify \
+  --certificate-identity-regexp '^https://github\.com/MaraClaw/Photon/\.github/workflows/release\.yml@refs/tags/openclaw-v.+$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  <namespace>/openclaw:<version>
+```
+
+Inspect the attestations with `docker buildx imagetools inspect <namespace>/openclaw:<version> --format '{{json .Provenance}}'` (or `'{{json .SBOM}}'`).
 
 ## Test
 
-With Python 3.15.2 and uv installed, run the standalone suite without Docker or other services:
+With uv and the Python version in `.python-version` (3.14.10 or newer) installed, run the standalone suite without Docker or other services. The dev extra includes pytest-xdist:
 
 ```bash
-uv run --extra dev pytest
+uv run --extra dev pytest -n auto
 ```
 
 To activate the versioned pre-push hook in a clone, run:
@@ -92,4 +115,4 @@ uv run --extra dev python tests/openclaw_validator_qa.py
 OPENCLAW_ASSET_MODE=staged OPENCLAW_ASSET_DIR="/absolute/path/to/staged assets" uv run --extra dev python tests/openclaw_validator_qa.py
 ```
 
-Staged validator QA requires the complete two-architecture layout above. Both QA modes need Docker Buildx, both target execution environments, and network access for the remaining build dependencies; staged QA also needs independently acquired inputs matching the pinned digests.
+`OPENCLAW_QA_PLATFORMS` selects a comma list of `linux/amd64` and `linux/arm64` (default both), and `OPENCLAW_QA_CACHE_FROM`/`OPENCLAW_QA_CACHE_TO` pass BuildKit cache specs. Staged validator QA requires `common/` plus the layout of each selected architecture. CI runs this QA once per architecture with a GitHub Actions BuildKit cache, alongside the test suite and a lint job (ShellCheck, Hadolint, actionlint). Both QA modes need Docker Buildx, both target execution environments, and network access for the remaining build dependencies; staged QA also needs independently acquired inputs matching the pinned digests.
