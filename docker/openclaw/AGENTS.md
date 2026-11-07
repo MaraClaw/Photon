@@ -5,19 +5,19 @@ Guest **OpenClaw agent image** helpers. Not the FastAPI API. Image contract also
 ## Chain
 
 ```
-tini -s -- validate-gogcli.sh validate-officecli.sh validate-soul-guardian.sh validate-linkup.sh validate-humanizer.sh bootstrap-agent-container.py openclaw gateway
+tini -s -- validate-gogcli.sh validate-officecli.sh validate-soul-guardian.sh validate-tavily.sh validate-humanizer.sh bootstrap-agent-container.py openclaw gateway
 USER: node
 ```
 
 | File | When | Role |
 |---|---|---|
 | `install-officecli.sh` | image build | Download pinned target binary and skill, verify both SHA256 digests, and install them into the image |
-| `install-linkup.sh` | image build | Install the bundled Linkup skills offline into the OpenClaw skills directory |
+| `install-tavily.sh` | image build | Install the bundled Tavily skills offline into the OpenClaw skills directory |
 | `install-humanizer.sh` | image build | Install the pinned Humanizer skill and upstream license from an online or staged archive |
 | `validate-gogcli.sh` | entrypoint | Verify gog, optionally load `GOG_KEYRING_PASSWORD_FILE`, and exec the supplied command unchanged |
 | `validate-officecli.sh` | entrypoint | Verify OfficeCLI and exec the supplied command unchanged |
 | `validate-soul-guardian.sh` | entrypoint | Verify the skill assets and non-mutating help probe, then exec the supplied command unchanged |
-| `validate-linkup.sh` | entrypoint | Verify the two bundled Linkup skills and references offline, then exec the supplied command unchanged |
+| `validate-tavily.sh` | entrypoint | Verify the two bundled Tavily skills and references offline, then exec the supplied command unchanged |
 | `validate-humanizer.sh` | entrypoint | Verify the Humanizer skill offline, then exec the supplied command unchanged |
 | `bootstrap-agent-container.py` | entrypoint (last), `docker exec` | Publish and enforce `AgentBootstrapCompleted` (see below); imports `bootstrap_event.py`, which owns the guest identity and the event file |
 
@@ -31,12 +31,14 @@ The engine and the image are a matched pair: an image built without this helper 
 
 ## Pins
 
+Runtime skill selection policy belongs in the `*-soul.md` fragments. The Dockerfile composes them into `/usr/local/share/openclaw/skills-soul.md` for engine-created workspaces and OpenClaw's default `SOUL.md` for standalone workspaces. Keep discovery metadata in each skill, execution guidance in its body, and API schemas in its references; avoid repeating selection policy there.
+
 - Base: architecture-pinned `nikolaik/python-nodejs:python3.15-nodejs26-slim` with Python 3.15 and Node 26. Backend image is `python:3.15.2-slim-trixie`. Sandbox Node image is `node:26.13.0-slim`.
 - gogcli supports **linux/amd64 and linux/arm64**, each with its own pinned digest. `build-openclaw-local-dockerfile.sh` uses **docker buildx --load** for one `DOCKER_PLATFORM` (default `linux/arm64`); other targets fail explicitly.
 - Publish requires `DOCKERHUB_NAMESPACE` or `OPENCLAW_PUBLISH_IMAGE` and an existing `docker login`. It builds both platforms with **docker buildx --push** under `${repo}:${IMAGE_TAG}` (default `OPENCLAW_VERSION`), adding `:latest` only when `PUSH_LATEST=1`. It does not load or retag a local image.
 - OfficeCLI and its skill are baked into the image; startup never downloads them or changes OpenClaw state or configuration.
 - Soul Guardian is baked into the image; startup validates it without initializing state or enabling monitoring.
-- Linkup skills are installed from `linkup-skills/` at build time; startup validates them offline without credentials.
+- Tavily skills are installed from `tavily-skills/` at build time; startup validates them offline without credentials.
 - Humanizer is installed at build time with installer-owned archive pins; startup validates it offline.
 - OpenClaw is installed from its checksum-verified pinned npm archive without local memory-provider patches.
 
