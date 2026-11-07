@@ -18,6 +18,7 @@ def tavily_fixture(tmp_path: Path) -> tuple[Path, dict[str, str], Path, Path]:
     shutil.copytree(PAYLOAD, source, symlinks=True)
     script = tmp_path / "installer.sh"
     script.write_text(INSTALLER.read_text().replace("/tmp/tavily-skills", f'"{source}"'))
+    shutil.copy(INSTALLER.with_name("install-common.sh"), tmp_path / "install-common.sh")
     script.chmod(0o755)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()

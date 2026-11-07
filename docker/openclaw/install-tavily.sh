@@ -1,35 +1,11 @@
 #!/bin/sh
 set -eu
 
+# shellcheck source=install-common.sh
+. "$(dirname -- "$0")/install-common.sh"
+
 source=/tmp/tavily-skills
-stage=$(mktemp -d "${TMPDIR:-/tmp}/tavily.XXXXXXXX")
-cleanup() {
-    status=$?
-    trap - EXIT
-    trap '' HUP INT TERM
-    if [ "$status" -ne 0 ]; then
-        failed=0
-        for marker in "$stage"/changed/*; do
-            [ -f "$marker" ] || continue
-            name=${marker##*/}
-            if ! rm -rf -- "${destination:?}/${name:?}"; then
-                failed=1
-            elif [ -e "$stage/backup/$name" ] || [ -L "$stage/backup/$name" ]; then
-                cp -a -- "$stage/backup/$name" "$destination/$name" || failed=1
-            fi
-        done
-        if [ "$failed" -ne 0 ]; then
-            printf 'Tavily restoration failed; backups retained at %s\n' "$stage" >&2
-            exit 1
-        fi
-    fi
-    rm -rf -- "$stage" || exit 1
-    exit "$status"
-}
-trap cleanup EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
+install_stage_init tavily.XXXXXXXX 'Tavily restoration failed; backups'
 mkdir "$stage/incoming" "$stage/backup" "$stage/changed"
 python3 - "$source/manifest.json" > "$stage/names" <<'PY'
 import json
@@ -72,12 +48,10 @@ PY
 destination="$HOME/.openclaw/skills"
 install -d -m 0755 "$destination"
 while IFS= read -r name; do
-    if [ -e "$destination/$name" ] || [ -L "$destination/$name" ]; then
-        cp -a -- "$destination/$name" "$stage/backup/$name"
-    fi
+    install_save "$destination/$name" "$stage/backup/$name"
 done < "$stage/names"
 while IFS= read -r name; do
-    : > "$stage/changed/$name"
+    install_mark_changed "$name"
     rm -rf -- "${destination:?}/${name:?}"
     cp -a -- "$stage/incoming/$name" "$destination/$name"
 done < "$stage/names"
