@@ -11,15 +11,9 @@ Build and load one local OpenClaw image. Environment settings:
   ENV_FILE                     env file to source (default: .env)
   OPENCLAW_ASSET_MODE          online (default) or staged
   OPENCLAW_ASSET_DIR           asset directory required in staged mode
-  OPENCLAW_VERSION             default: 2026.11.1
-  OPENCLAW_SHA256              default: sha256:611282534d576e12f10b0ac5a1ac0d2825aac360637e92815a56eb71fb5a0301
-  GOGCLI_VERSION               default: 0.47.1
-  GOGCLI_AMD64_SHA256          default: sha256:279bc3a03c1919d774e268ef229949f45b753a0e21257f9fb315b05be7a40ea9
-  GOGCLI_ARM64_SHA256          default: sha256:c677ac6abf5e187e987a87fe1b588f454b002a7d7019de81b9e8db02e9e902b6
-  OFFICECLI_VERSION            default: v1.0.160
-  OFFICECLI_ARM64_SHA256       default: e8f06aff6c59f11a73a1a1218bda3ce170299201fd56bce6d62ecd4d0c024e53
-  OFFICECLI_AMD64_SHA256       default: baa084b64ec634bd9d41a0592db3ed85f11658b358bab898679537ea7f3e73a9
-  OFFICECLI_SKILL_SHA256       default: c950d285ce60021712b4753fb2d9f592308d5622bab776229061dfecb1ce55d4
+  OPENCLAW_VERSION, OPENCLAW_SHA256, GOGCLI_VERSION, GOGCLI_{AMD64,ARM64}_SHA256,
+  OFFICECLI_VERSION, OFFICECLI_{ARM64,AMD64,SKILL}_SHA256
+                               optional pins; defaults come from Dockerfile.openclaw
   GOGCLI_SKILLS_COMMIT         optional gogcli-skills archive commit (default: installer pin)
   GOGCLI_SKILLS_SHA256         optional gogcli-skills archive digest (default: installer pin)
   CLAWSEC_COMMIT               optional Soul Guardian archive commit (default: installer pin)
@@ -29,7 +23,8 @@ Build and load one local OpenClaw image. Environment settings:
 
 The selected env file is sourced from the script directory if it exists;
 its assignments override inherited environment values. Empty values use defaults.
-The archive pins are forwarded only when nonempty.
+Every pin is forwarded as a build argument only when set and nonempty; unset pins
+use the ARG defaults in Dockerfile.openclaw.
 The target architecture is prepended literally to the image name:
   ./build-openclaw-local-dockerfile.sh  -> arm64-openclaw:local
   DOCKER_PLATFORM=linux/amd64 MARACLAW_OPENCLAW_IMAGE=workspace/openclaw:custom \
@@ -51,24 +46,11 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-ENV_FILE="${ENV_FILE:-.env}"
-if [ -f "$ENV_FILE" ]; then
-    echo "[openclaw-build] Sourcing $ENV_FILE"
-    set -a
-    # shellcheck disable=SC1090
-    . "$ENV_FILE"
-    set +a
-fi
+# shellcheck source=openclaw-buildx-common.sh
+. "$SCRIPT_DIR/openclaw-buildx-common.sh"
 
-OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.11.1}"
-OPENCLAW_SHA256="${OPENCLAW_SHA256:-sha256:611282534d576e12f10b0ac5a1ac0d2825aac360637e92815a56eb71fb5a0301}"
-GOGCLI_VERSION="${GOGCLI_VERSION:-0.47.1}"
-GOGCLI_AMD64_SHA256="${GOGCLI_AMD64_SHA256:-sha256:279bc3a03c1919d774e268ef229949f45b753a0e21257f9fb315b05be7a40ea9}"
-GOGCLI_ARM64_SHA256="${GOGCLI_ARM64_SHA256:-sha256:c677ac6abf5e187e987a87fe1b588f454b002a7d7019de81b9e8db02e9e902b6}"
-OFFICECLI_VERSION="${OFFICECLI_VERSION:-v1.0.160}"
-OFFICECLI_ARM64_SHA256="${OFFICECLI_ARM64_SHA256:-e8f06aff6c59f11a73a1a1218bda3ce170299201fd56bce6d62ecd4d0c024e53}"
-OFFICECLI_AMD64_SHA256="${OFFICECLI_AMD64_SHA256:-baa084b64ec634bd9d41a0592db3ed85f11658b358bab898679537ea7f3e73a9}"
-OFFICECLI_SKILL_SHA256="${OFFICECLI_SKILL_SHA256:-c950d285ce60021712b4753fb2d9f592308d5622bab776229061dfecb1ce55d4}"
+openclaw_source_env_file openclaw-build
+
 DOCKER_PLATFORM="${DOCKER_PLATFORM:-linux/arm64}"
 
 case "$DOCKER_PLATFORM" in
@@ -81,48 +63,16 @@ esac
 
 LOCAL_IMAGE="${DOCKER_PLATFORM#linux/}-${MARACLAW_OPENCLAW_IMAGE:-openclaw:local}"
 
-PIN_ARGS=()
-for pin_name in GOGCLI_SKILLS_COMMIT GOGCLI_SKILLS_SHA256 CLAWSEC_COMMIT CLAWSEC_SHA256 HUMANIZER_COMMIT HUMANIZER_SHA256; do
-    pin_value="${!pin_name:-}"
-    if [ -n "$pin_value" ]; then
-        PIN_ARGS+=(--build-arg "$pin_name=$pin_value")
-    fi
-done
+openclaw_collect_pin_args
 
-ASSET_ARGS=()
-case "${OPENCLAW_ASSET_MODE:-online}" in
-    online) ;;
-    staged)
-        if [ -z "${OPENCLAW_ASSET_DIR:-}" ] || [ ! -d "$OPENCLAW_ASSET_DIR" ]; then
-            echo '[openclaw-build] OPENCLAW_ASSET_DIR must name an existing directory in staged mode' >&2
-            exit 2
-        fi
-        ASSET_DIR="$(cd "$OPENCLAW_ASSET_DIR" && pwd -P)"
-        for asset in "linux-${DOCKER_PLATFORM#linux/}/gogcli.tar.gz" "linux-${DOCKER_PLATFORM#linux/}/officecli" \
-            common/officecli-SKILL.md common/gogcli-skills.tar.gz common/soul-guardian.tar.gz common/humanizer.tar.gz; do
-            if [ ! -f "$ASSET_DIR/$asset" ]; then
-                echo "[openclaw-build] missing staged asset: $ASSET_DIR/$asset" >&2
-                exit 2
-            fi
-        done
-        ASSET_ARGS=(--build-arg OPENCLAW_ASSET_MODE=staged --build-context "openclaw_assets=$ASSET_DIR")
-        ;;
-    *) echo "[openclaw-build] invalid OPENCLAW_ASSET_MODE: $OPENCLAW_ASSET_MODE" >&2; exit 2 ;;
-esac
+openclaw_collect_asset_args openclaw-build \
+    "linux-${DOCKER_PLATFORM#linux/}/gogcli.tar.gz" "linux-${DOCKER_PLATFORM#linux/}/officecli" \
+    common/officecli-SKILL.md common/gogcli-skills.tar.gz common/soul-guardian.tar.gz common/humanizer.tar.gz
 
-echo "[openclaw-build] Building $LOCAL_IMAGE for $DOCKER_PLATFORM with OpenClaw $OPENCLAW_VERSION"
+echo "[openclaw-build] Building $LOCAL_IMAGE for $DOCKER_PLATFORM with OpenClaw ${OPENCLAW_VERSION:-(Dockerfile.openclaw default)}"
 docker buildx build \
     --platform "$DOCKER_PLATFORM" \
     -f Dockerfile.openclaw \
-    --build-arg OPENCLAW_VERSION="$OPENCLAW_VERSION" \
-    --build-arg OPENCLAW_SHA256="$OPENCLAW_SHA256" \
-    --build-arg GOGCLI_VERSION="$GOGCLI_VERSION" \
-    --build-arg GOGCLI_AMD64_SHA256="$GOGCLI_AMD64_SHA256" \
-    --build-arg GOGCLI_ARM64_SHA256="$GOGCLI_ARM64_SHA256" \
-    --build-arg OFFICECLI_VERSION="$OFFICECLI_VERSION" \
-    --build-arg OFFICECLI_ARM64_SHA256="$OFFICECLI_ARM64_SHA256" \
-    --build-arg OFFICECLI_AMD64_SHA256="$OFFICECLI_AMD64_SHA256" \
-    --build-arg OFFICECLI_SKILL_SHA256="$OFFICECLI_SKILL_SHA256" \
     ${PIN_ARGS[@]+"${PIN_ARGS[@]}"} \
     ${ASSET_ARGS[@]+"${ASSET_ARGS[@]}"} \
     -t "$LOCAL_IMAGE" \

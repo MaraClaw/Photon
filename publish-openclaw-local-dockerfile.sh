@@ -12,13 +12,15 @@
 # Environment (set in .env or on the command line):
 #   DOCKERHUB_NAMESPACE     Docker Hub user or org (required unless OPENCLAW_PUBLISH_IMAGE is set)
 #   OPENCLAW_PUBLISH_IMAGE  full repo name          (default: ${DOCKERHUB_NAMESPACE}/openclaw)
-#   IMAGE_TAG               Hub tag                 (default: $OPENCLAW_VERSION)
+#   IMAGE_TAG               Hub tag                 (default: $OPENCLAW_VERSION, else the ARG in Dockerfile.openclaw)
 #   PUSH_LATEST=1           also tag and push :latest
 #   OPENCLAW_VERSION, OPENCLAW_SHA256, GOGCLI_VERSION, GOGCLI_{AMD64,ARM64}_SHA256
 #   OFFICECLI_VERSION, OFFICECLI_{AMD64,ARM64,SKILL}_SHA256
-#                           same pins as the local build script
 #   GOGCLI_SKILLS_{COMMIT,SHA256}, CLAWSEC_{COMMIT,SHA256}, HUMANIZER_{COMMIT,SHA256}
-#                           optional archive pins, forwarded only when nonempty
+#                           optional pins, forwarded only when set and nonempty;
+#                           defaults come from the ARG lines in Dockerfile.openclaw
+#
+# The pushed manifest carries max-mode provenance and an SBOM attestation.
 #
 # Requires an existing `docker login` to Docker Hub. This script does not store credentials.
 
@@ -27,25 +29,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-ENV_FILE="${ENV_FILE:-.env}"
-if [ -f "$ENV_FILE" ]; then
-    echo "[openclaw-publish] Sourcing $ENV_FILE"
-    set -a
-    # shellcheck disable=SC1090
-    . "$ENV_FILE"
-    set +a
-fi
+# shellcheck source=openclaw-buildx-common.sh
+. "$SCRIPT_DIR/openclaw-buildx-common.sh"
 
-OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.11.1}"
-OPENCLAW_SHA256="${OPENCLAW_SHA256:-sha256:611282534d576e12f10b0ac5a1ac0d2825aac360637e92815a56eb71fb5a0301}"
-GOGCLI_VERSION="${GOGCLI_VERSION:-0.47.1}"
-GOGCLI_AMD64_SHA256="${GOGCLI_AMD64_SHA256:-sha256:279bc3a03c1919d774e268ef229949f45b753a0e21257f9fb315b05be7a40ea9}"
-GOGCLI_ARM64_SHA256="${GOGCLI_ARM64_SHA256:-sha256:c677ac6abf5e187e987a87fe1b588f454b002a7d7019de81b9e8db02e9e902b6}"
-OFFICECLI_VERSION="${OFFICECLI_VERSION:-v1.0.160}"
-OFFICECLI_ARM64_SHA256="${OFFICECLI_ARM64_SHA256:-e8f06aff6c59f11a73a1a1218bda3ce170299201fd56bce6d62ecd4d0c024e53}"
-OFFICECLI_AMD64_SHA256="${OFFICECLI_AMD64_SHA256:-baa084b64ec634bd9d41a0592db3ed85f11658b358bab898679537ea7f3e73a9}"
-OFFICECLI_SKILL_SHA256="${OFFICECLI_SKILL_SHA256:-c950d285ce60021712b4753fb2d9f592308d5622bab776229061dfecb1ce55d4}"
-IMAGE_TAG="${IMAGE_TAG:-$OPENCLAW_VERSION}"
+openclaw_source_env_file openclaw-publish
+
+IMAGE_TAG="${IMAGE_TAG:-${OPENCLAW_VERSION:-}}"
+if [ -z "$IMAGE_TAG" ]; then
+    IMAGE_TAG="$(sed -n 's/^ARG OPENCLAW_VERSION=//p' Dockerfile.openclaw 2>/dev/null | head -n 1 || true)"
+    if [ -z "$IMAGE_TAG" ]; then
+        echo "[openclaw-publish] ERROR: OPENCLAW_VERSION is unset and no 'ARG OPENCLAW_VERSION=' line could be read from $SCRIPT_DIR/Dockerfile.openclaw" >&2
+        exit 2
+    fi
+fi
 
 if [ -n "${OPENCLAW_PUBLISH_IMAGE:-}" ]; then
     PUBLISH_IMAGE="$OPENCLAW_PUBLISH_IMAGE"
@@ -74,34 +70,11 @@ if ! printf '%s' "$IMAGE_TAG" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]*$'; then
     exit 2
 fi
 
-PIN_ARGS=()
-for pin_name in GOGCLI_SKILLS_COMMIT GOGCLI_SKILLS_SHA256 CLAWSEC_COMMIT CLAWSEC_SHA256 HUMANIZER_COMMIT HUMANIZER_SHA256; do
-    pin_value="${!pin_name:-}"
-    if [ -n "$pin_value" ]; then
-        PIN_ARGS+=(--build-arg "$pin_name=$pin_value")
-    fi
-done
+openclaw_collect_pin_args
 
-ASSET_ARGS=()
-case "${OPENCLAW_ASSET_MODE:-online}" in
-    online) ;;
-    staged)
-        if [ -z "${OPENCLAW_ASSET_DIR:-}" ] || [ ! -d "$OPENCLAW_ASSET_DIR" ]; then
-            echo '[openclaw-publish] OPENCLAW_ASSET_DIR must name an existing directory in staged mode' >&2
-            exit 2
-        fi
-        ASSET_DIR="$(cd "$OPENCLAW_ASSET_DIR" && pwd -P)"
-        for asset in linux-amd64/gogcli.tar.gz linux-amd64/officecli linux-arm64/gogcli.tar.gz linux-arm64/officecli \
-            common/officecli-SKILL.md common/gogcli-skills.tar.gz common/soul-guardian.tar.gz common/humanizer.tar.gz; do
-            if [ ! -f "$ASSET_DIR/$asset" ]; then
-                echo "[openclaw-publish] missing staged asset: $ASSET_DIR/$asset" >&2
-                exit 2
-            fi
-        done
-        ASSET_ARGS=(--build-arg OPENCLAW_ASSET_MODE=staged --build-context "openclaw_assets=$ASSET_DIR")
-        ;;
-    *) echo "[openclaw-publish] invalid OPENCLAW_ASSET_MODE: $OPENCLAW_ASSET_MODE" >&2; exit 2 ;;
-esac
+openclaw_collect_asset_args openclaw-publish \
+    linux-amd64/gogcli.tar.gz linux-amd64/officecli linux-arm64/gogcli.tar.gz linux-arm64/officecli \
+    common/officecli-SKILL.md common/gogcli-skills.tar.gz common/soul-guardian.tar.gz common/humanizer.tar.gz
 
 VERSIONED_REF="${PUBLISH_IMAGE}:${IMAGE_TAG}"
 echo "[openclaw-publish] Building linux/amd64,linux/arm64 and pushing $VERSIONED_REF"
@@ -115,18 +88,11 @@ fi
 docker buildx build \
     --platform linux/amd64,linux/arm64 \
     -f Dockerfile.openclaw \
-    --build-arg OPENCLAW_VERSION="$OPENCLAW_VERSION" \
-    --build-arg OPENCLAW_SHA256="$OPENCLAW_SHA256" \
-    --build-arg GOGCLI_VERSION="$GOGCLI_VERSION" \
-    --build-arg GOGCLI_AMD64_SHA256="$GOGCLI_AMD64_SHA256" \
-    --build-arg GOGCLI_ARM64_SHA256="$GOGCLI_ARM64_SHA256" \
-    --build-arg OFFICECLI_VERSION="$OFFICECLI_VERSION" \
-    --build-arg OFFICECLI_ARM64_SHA256="$OFFICECLI_ARM64_SHA256" \
-    --build-arg OFFICECLI_AMD64_SHA256="$OFFICECLI_AMD64_SHA256" \
-    --build-arg OFFICECLI_SKILL_SHA256="$OFFICECLI_SKILL_SHA256" \
     ${PIN_ARGS[@]+"${PIN_ARGS[@]}"} \
     ${ASSET_ARGS[@]+"${ASSET_ARGS[@]}"} \
     "${TAGS[@]}" \
+    --provenance=mode=max \
+    --sbom=true \
     --push \
     .
 
