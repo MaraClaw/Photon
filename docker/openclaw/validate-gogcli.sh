@@ -14,6 +14,7 @@ case $validator_path in
         ;;
 esac
 probe_dir=${validator_path%/*}
+# shellcheck source=startup-probe.sh
 . "$probe_dir/startup-probe.sh"
 
 if ! probe_run python3 -B "$probe_dir/installed-assets.py" verify --component gogcli --inventory-dir /usr/local/share/openclaw-integrity --skills-root "$HOME/.openclaw/skills"; then
@@ -54,10 +55,8 @@ fi
 GOG_KEYRING_PASSWORD=$probe_output
 export GOG_KEYRING_PASSWORD
 
-if [ "${GOG_HOME:-}" ]; then
-    mkdir -p "$GOG_HOME"
-    chmod 0700 "$GOG_HOME"
-fi
+mkdir -p "$GOG_HOME"
+chmod 0700 "$GOG_HOME"
 
 probe_finish
 exec "$@"

@@ -1,6 +1,7 @@
 import json
 import os
 import signal
+import subprocess
 import time
 
 import openclaw_bootstrap_test_support as bootstrap_support
@@ -119,18 +120,26 @@ def test_signal_before_ready_cancels_startup(guest: Guest, readyz: Readyz, signu
     assert not guest.event.parent.exists()
 
 
+def has_terminated(pid: int) -> bool:
+    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False).stdout.strip()
+    return not state or state.startswith("Z")
+
+
 def test_gateway_that_dies_as_readyz_answers_is_never_published(guest: Guest, readyz: Readyz) -> None:
     with guest.running(*GATEWAY) as helper:
         guest.wait_started()
         pid = guest.gateway_pid()
+        died_before_answer: list[bool] = []
 
         def kill_then_answer() -> None:
             os.kill(pid, signal.SIGKILL)
-            time.sleep(0.3)
+            wait_until(lambda: has_terminated(pid), timeout=0.8)  # under the helper's 1 s attempt timeout, so the 200 still arrives
+            died_before_answer.append(True)
 
         readyz.on_request = kill_then_answer
         readyz.status = 200
         assert helper.wait(timeout=10) == 128 + signal.SIGKILL
+        assert died_before_answer
     assert not guest.event.parent.exists()
 
 

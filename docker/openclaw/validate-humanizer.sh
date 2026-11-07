@@ -14,6 +14,7 @@ case $validator_path in
         ;;
 esac
 probe_dir=${validator_path%/*}
+# shellcheck source=startup-probe.sh
 . "$probe_dir/startup-probe.sh"
 
 if ! probe_run python3 -B "$probe_dir/installed-assets.py" verify --component humanizer --inventory-dir /usr/local/share/openclaw-integrity --skills-root "$HOME/.openclaw/skills"; then

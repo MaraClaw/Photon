@@ -1,2 +1,2 @@
 #!/bin/sh
-exec uv run --extra dev pytest
+exec uv run --extra dev pytest -n auto
