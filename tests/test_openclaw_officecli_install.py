@@ -1,6 +1,7 @@
 import hashlib
 import os
 import shlex
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Final
@@ -29,6 +30,7 @@ def install_fixture(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     source = source.replace("/usr/local/bin/officecli", shlex.quote(str(destination / "officecli")))
     script = tmp_path / "installer.sh"
     script.write_text(source)
+    shutil.copy(INSTALLER.with_name("install-common.sh"), tmp_path / "install-common.sh")
     curl = bin_dir / "curl"
     curl.write_text(
         '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CURL_LOG"\n'

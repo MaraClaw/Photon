@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -6,10 +7,10 @@ import pytest
 
 from test_openclaw_build_script import (
     ARCHIVE_PIN_NAMES,
-    GOGCLI_AMD64_SHA256,
-    GOGCLI_ARM64_SHA256,
     OFFICECLI_PINS,
+    PIN_NAMES,
     forwarded_archive_pins,
+    forwarded_pins,
     install_fake_docker,
     read_docker_argv,
     write_env_file,
@@ -17,14 +18,14 @@ from test_openclaw_build_script import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PUBLISH_SCRIPT = REPO_ROOT / "publish-openclaw-local-dockerfile.sh"
-OPENCLAW_VERSION = "2026.10.10"
+OPENCLAW_VERSION = "2026.11.1"
 
 
 def build_env(bin_dir: Path, log_path: Path, missing_env_file: Path) -> dict[str, str]:
     environment = os.environ.copy()
     for key in ("DOCKERHUB_NAMESPACE", "OPENCLAW_PUBLISH_IMAGE", "IMAGE_TAG", "PUSH_LATEST", "DOCKER_PLATFORM"):
         environment.pop(key, None)
-    for key in (*OFFICECLI_PINS, *ARCHIVE_PIN_NAMES):
+    for key in PIN_NAMES:
         environment.pop(key, None)
     environment.update(
         ENV_FILE=str(missing_env_file),
@@ -52,18 +53,19 @@ def test_officecli_pins_are_forwarded_from_selected_source(tmp_path: Path, scrip
         environment.update(process_pins)
     if source == "file":
         env_file.write_text("".join(f"{name}={value}\n" for name, value in file_pins.items()))
-    expected = {"default": OFFICECLI_PINS, "process": process_pins, "file": file_pins}[source]
+    expected = {"default": {}, "process": process_pins, "file": file_pins}[source]
 
     result = subprocess.run([str(script)], cwd=REPO_ROOT, env=environment, capture_output=True, text=True, check=False)
 
     assert result.returncode == 0, result.stderr
     args = Path(f"{log_path}.argv").read_bytes().decode().split("\0")[:-1]
+    assert forwarded_pins(args) == expected
     for name, value in expected.items():
         assert args[args.index(f"{name}={value}") - 1] == "--build-arg"
 
 
 @pytest.mark.parametrize("script", [PUBLISH_SCRIPT, REPO_ROOT / "build-openclaw-local-dockerfile.sh"])
-@pytest.mark.parametrize("name", ARCHIVE_PIN_NAMES)
+@pytest.mark.parametrize("name", PIN_NAMES)
 @pytest.mark.parametrize(
     ("inherited", "from_file", "expected"),
     [
@@ -76,13 +78,13 @@ def test_officecli_pins_are_forwarded_from_selected_source(tmp_path: Path, scrip
         (None, "", None),
     ],
 )
-def test_each_archive_pin_is_forwarded_alone_only_when_nonempty_after_file_precedence(
+def test_each_pin_is_forwarded_alone_only_when_nonempty_after_file_precedence(
     tmp_path: Path, script: Path, name: str, inherited: str | None, from_file: str | None, expected: str | None
 ) -> None:
     # Given
     bin_dir, log_path = install_fake_docker(tmp_path)
     env_file = tmp_path / "pins.env"
-    environment = build_env(bin_dir, log_path, env_file) | {"DOCKERHUB_NAMESPACE": "acme"}
+    environment = build_env(bin_dir, log_path, env_file) | {"DOCKERHUB_NAMESPACE": "acme", "IMAGE_TAG": "pin-test"}
     if inherited is not None:
         environment[name] = inherited
     if from_file is not None:
@@ -93,7 +95,7 @@ def test_each_archive_pin_is_forwarded_alone_only_when_nonempty_after_file_prece
 
     # Then
     assert result.returncode == 0, result.stderr
-    assert forwarded_archive_pins(read_docker_argv(log_path)) == ({} if expected is None else {name: expected})
+    assert forwarded_pins(read_docker_argv(log_path)) == ({} if expected is None else {name: expected})
 
 
 @pytest.mark.parametrize("script", [PUBLISH_SCRIPT, REPO_ROOT / "build-openclaw-local-dockerfile.sh"])
@@ -173,9 +175,110 @@ def test_publisher_pushes_both_targets_in_one_build_without_local_load(
     assert "--push" in command
     assert "--load" not in command
     assert "login" not in command
-    assert f"--build-arg GOGCLI_AMD64_SHA256={GOGCLI_AMD64_SHA256}" in command
-    assert f"--build-arg GOGCLI_ARM64_SHA256={GOGCLI_ARM64_SHA256}" in command
+    assert "--provenance=mode=max" in command.split()
+    assert "--sbom=true" in command.split()
+    assert forwarded_pins(read_docker_argv(log_path)) == {}
     assert "GOG_KEYRING_PASSWORD" not in command
+
+
+def stage_script_copy(tmp_path: Path, script: Path, dockerfile: str | None) -> Path:
+    root = tmp_path / "repo"
+    root.mkdir()
+    for name in (script.name, "openclaw-buildx-common.sh"):
+        shutil.copy2(REPO_ROOT / name, root / name)
+    if dockerfile is not None:
+        (root / "Dockerfile.openclaw").write_text(dockerfile, encoding="utf-8")
+    return root / script.name
+
+
+def test_publisher_defaults_image_tag_to_dockerfile_openclaw_version_without_forwarding_it(tmp_path: Path) -> None:
+    # Given
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    script = stage_script_copy(tmp_path, PUBLISH_SCRIPT, "ARG TARGETOS\nARG OPENCLAW_VERSION=9.8.7\nARG OPENCLAW_SHA256=sha256:abc\n")
+    environment = build_env(bin_dir, log_path, tmp_path / "missing.env") | {"DOCKERHUB_NAMESPACE": "acme"}
+
+    # When
+    result = subprocess.run([str(script)], cwd=script.parent, env=environment, capture_output=True, text=True, check=False)  # noqa: S603
+
+    # Then
+    assert result.returncode == 0, result.stderr
+    args = read_docker_argv(log_path)
+    assert args[args.index("-t") + 1] == "acme/openclaw:9.8.7"
+    assert forwarded_pins(args) == {}
+
+
+def test_publisher_tags_and_forwards_configured_openclaw_version_over_dockerfile_default(tmp_path: Path) -> None:
+    # Given
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    script = stage_script_copy(tmp_path, PUBLISH_SCRIPT, "ARG OPENCLAW_VERSION=9.8.7\n")
+    environment = build_env(bin_dir, log_path, tmp_path / "missing.env") | {"DOCKERHUB_NAMESPACE": "acme", "OPENCLAW_VERSION": "1.2.3"}
+
+    # When
+    result = subprocess.run([str(script)], cwd=script.parent, env=environment, capture_output=True, text=True, check=False)  # noqa: S603
+
+    # Then
+    assert result.returncode == 0, result.stderr
+    args = read_docker_argv(log_path)
+    assert args[args.index("-t") + 1] == "acme/openclaw:1.2.3"
+    assert forwarded_pins(args) == {"OPENCLAW_VERSION": "1.2.3"}
+
+
+@pytest.mark.parametrize("dockerfile", [None, "ARG OPENCLAW_SHA256=sha256:abc\n", "ARG OPENCLAW_VERSION=\n"])
+def test_publisher_rejects_unreadable_dockerfile_version_before_docker(tmp_path: Path, dockerfile: str | None) -> None:
+    # Given
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    script = stage_script_copy(tmp_path, PUBLISH_SCRIPT, dockerfile)
+    environment = build_env(bin_dir, log_path, tmp_path / "missing.env") | {"DOCKERHUB_NAMESPACE": "acme"}
+
+    # When
+    result = subprocess.run([str(script)], cwd=script.parent, env=environment, capture_output=True, text=True, check=False)  # noqa: S603
+
+    # Then
+    assert result.returncode == 2
+    assert "[openclaw-publish]" in result.stderr
+    assert "ARG OPENCLAW_VERSION=" in result.stderr
+    assert not log_path.exists()
+
+
+@pytest.mark.parametrize("script", [PUBLISH_SCRIPT, REPO_ROOT / "build-openclaw-local-dockerfile.sh"])
+def test_scripts_delegate_to_the_shared_common_file(tmp_path: Path, script: Path) -> None:
+    # Given
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    copy = stage_script_copy(tmp_path, script, "ARG OPENCLAW_VERSION=9.8.7\n")
+    (copy.parent / "openclaw-buildx-common.sh").write_text(
+        "openclaw_source_env_file() { :; }\n"
+        "openclaw_collect_pin_args() { PIN_ARGS=(--build-arg SHARED_SENTINEL=pins); }\n"
+        "openclaw_collect_asset_args() { ASSET_ARGS=(--build-arg SHARED_SENTINEL_ASSETS=\"$*\"); }\n",
+        encoding="utf-8",
+    )
+    environment = build_env(bin_dir, log_path, tmp_path / "missing.env") | {"DOCKERHUB_NAMESPACE": "acme"}
+
+    # When
+    result = subprocess.run([str(copy)], cwd=copy.parent, env=environment, capture_output=True, text=True, check=False)  # noqa: S603
+
+    # Then
+    assert result.returncode == 0, result.stderr
+    args = read_docker_argv(log_path)
+    assert "SHARED_SENTINEL=pins" in args
+    assert any(argument.startswith("SHARED_SENTINEL_ASSETS=") and "common/humanizer.tar.gz" in argument for argument in args)
+    prefix = "openclaw-publish" if script == PUBLISH_SCRIPT else "openclaw-build"
+    assert any(argument.startswith(f"SHARED_SENTINEL_ASSETS={prefix} ") for argument in args)
+
+
+@pytest.mark.parametrize("script", [PUBLISH_SCRIPT, REPO_ROOT / "build-openclaw-local-dockerfile.sh"])
+def test_scripts_fail_without_the_shared_common_file(tmp_path: Path, script: Path) -> None:
+    # Given
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    copy = stage_script_copy(tmp_path, script, "ARG OPENCLAW_VERSION=9.8.7\n")
+    (copy.parent / "openclaw-buildx-common.sh").unlink()
+    environment = build_env(bin_dir, log_path, tmp_path / "missing.env") | {"DOCKERHUB_NAMESPACE": "acme"}
+
+    # When
+    result = subprocess.run([str(copy)], cwd=copy.parent, env=environment, capture_output=True, text=True, check=False)  # noqa: S603
+
+    # Then
+    assert result.returncode != 0
+    assert not log_path.exists()
 
 
 def test_publisher_prefers_env_file_repository_tag_and_pins(tmp_path: Path) -> None:

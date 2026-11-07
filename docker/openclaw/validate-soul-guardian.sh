@@ -14,6 +14,7 @@ case $validator_path in
         ;;
 esac
 probe_dir=${validator_path%/*}
+# shellcheck source=startup-probe.sh
 . "$probe_dir/startup-probe.sh"
 
 if ! probe_run python3 -B "$probe_dir/installed-assets.py" verify --component soul-guardian --inventory-dir /usr/local/share/openclaw-integrity --skills-root "$HOME/.openclaw/skills"; then
@@ -28,19 +29,6 @@ for asset in SKILL.md CHANGELOG.md skill.json LICENSE scripts/soul_guardian.py s
         exit 1
     fi
 done
-
-if ! probe_run python3 -B -c '
-import json
-import sys
-from pathlib import Path
-
-with open(sys.argv[1], encoding="utf-8") as metadata:
-    json.load(metadata)
-compile(Path(sys.argv[2]).read_bytes(), sys.argv[2], "exec")
-' "$skill_dir/skill.json" "$skill_dir/scripts/onboard_state_dir.py"; then
-    printf '%s\n' 'Required skill failed verification: soul-guardian' >&2
-    exit 1
-fi
 
 if ! probe_run python3 -B "$skill_dir/scripts/soul_guardian.py" --help; then
     printf '%s\n' 'Required skill failed verification: soul-guardian' >&2

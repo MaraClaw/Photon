@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Final
 
-COMPONENTS: Final = ("gogcli", "officecli", "soul-guardian", "linkup", "humanizer")
+COMPONENTS: Final = ("gogcli", "officecli", "soul-guardian", "tavily", "humanizer")
 DIRECTORY_FLAGS: Final = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 
 
@@ -66,7 +66,7 @@ def create(skills_root: Path, roots_file: Path, output_dir: Path) -> None:
         "gogcli": [Path("/usr/local/bin/gog"), *(skills_root / name for name in names)],
         "officecli": [Path("/usr/local/bin/officecli"), skills_root / "officecli"],
         "soul-guardian": [skills_root / "soul-guardian"],
-        "linkup": [skills_root / "linkup-search", skills_root / "linkup-fetch"],
+        "tavily": [skills_root / "tavily-search", skills_root / "tavily-crawl"],
         "humanizer": [skills_root / "humanizer"],
     }
     inventories = {

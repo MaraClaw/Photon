@@ -116,19 +116,14 @@ def test_invalid_asset_blocks_child(guardian: tuple[Path, dict[str, str]], asset
     assert not (Path(env["HOME"]) / "guardian-state").exists()
 
 
-@pytest.mark.parametrize("failure", ["home-redirect", "broken-python", "malformed-json", "broken-onboarding"])
+@pytest.mark.parametrize("failure", ["home-redirect", "broken-python"])
 def test_probe_or_discovery_failure_blocks_child(guardian: tuple[Path, dict[str, str]], failure: str) -> None:
     skill, env = guardian
     if failure == "broken-python":
         (skill / "scripts/soul_guardian.py").write_text('raise RuntimeError("secret diagnostic")\n')
+        rebaseline(env)
     if failure == "home-redirect":
         env["HOME"] = str(skill.parents[3] / "other-home")
-    if failure == "malformed-json":
-        (skill / "skill.json").write_text("{broken\n")
-    if failure == "broken-onboarding":
-        (skill / "scripts/onboard_state_dir.py").write_text("def broken(:\n")
-    if failure in {"broken-python", "malformed-json", "broken-onboarding"}:
-        rebaseline(env)
     result = subprocess.run(
         ["/bin/sh", env["VALIDATOR"], "/bin/sh", "-c", 'touch "$CHILD_LOG"'],
         env=env, capture_output=True, text=True, check=False,
@@ -142,7 +137,7 @@ def test_probe_or_discovery_failure_blocks_child(guardian: tuple[Path, dict[str,
     assert not list(skill.rglob("*.pyc"))
 
 
-@pytest.mark.parametrize("probe", ["compile", "help"])
+@pytest.mark.parametrize("probe", ["integrity", "help"])
 def test_guardian_hanging_probe_times_out(guardian: tuple[Path, dict[str, str]], probe: str) -> None:
     skill, env = guardian
     root = Path(env["HOME"]).parent
@@ -157,7 +152,7 @@ def test_guardian_hanging_probe_times_out(guardian: tuple[Path, dict[str, str]],
 def test_invalid_policy_prevents_guardian_probes(guardian: tuple[Path, dict[str, str]], key: str, value: str) -> None:
     _, env = guardian
     root = Path(env["HOME"]).parent
-    install_hang(root, env, root / "bin/python3", python_probe="compile")
+    install_hang(root, env, root / "bin/python3", python_probe="integrity")
     exercise_invalid_policy(Path(env["VALIDATOR"]), env, key, value)
 
 
@@ -165,7 +160,7 @@ def test_invalid_policy_prevents_guardian_probes(guardian: tuple[Path, dict[str,
 def test_guardian_signal_cleans_parsing_group(guardian: tuple[Path, dict[str, str]], signum: int) -> None:
     _, env = guardian
     root = Path(env["HOME"]).parent
-    install_hang(root, env, root / "bin/python3", python_probe="compile")
+    install_hang(root, env, root / "bin/python3", python_probe="integrity")
     exercise_signal(Path(env["VALIDATOR"]), env, signum)
 
 
@@ -174,7 +169,7 @@ def test_guardian_restart_rechecks_hanging_probe(guardian: tuple[Path, dict[str,
     root = Path(env["HOME"]).parent
     assert subprocess.run(["/bin/sh", env["VALIDATOR"], "/bin/sh", "-c", ":"], env=env, timeout=5, check=False).returncode == 0
     (Path(env["HOME"]) / ".guardian-checked").touch()
-    install_hang(root, env, root / "bin/python3", python_probe="compile")
+    install_hang(root, env, root / "bin/python3", python_probe="integrity")
     exercise_timeout(Path(env["VALIDATOR"]), env)
 
 

@@ -16,12 +16,50 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: "0.13.6"
+          version: "0.13.7"
           enable-cache: true
       - name: Test image contracts
-        run: uv run --extra dev pytest
+        run: uv run --extra dev pytest -n auto
+
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      SHELLCHECK_VERSION: v0.11.0
+      SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+      HADOLINT_VERSION: v2.15.1
+      HADOLINT_SHA256: c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507
+      ACTIONLINT_VERSION: 1.7.12
+      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install linters
+        run: |
+          set -euo pipefail
+          tools="$RUNNER_TEMP/lint-tools"
+          mkdir -p "$tools"
+          cd "$tools"
+          curl -fsSL --retry 3 -o shellcheck.tar.xz "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf shellcheck.tar.xz --strip-components=1 "shellcheck-${SHELLCHECK_VERSION}/shellcheck"
+          curl -fsSL --retry 3 -o hadolint "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-linux-x86_64"
+          echo "${HADOLINT_SHA256}  hadolint" | sha256sum -c -
+          chmod +x hadolint
+          curl -fsSL --retry 3 -o actionlint.tar.gz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz actionlint
+          rm -f shellcheck.tar.xz actionlint.tar.gz
+          echo "$tools" >> "$GITHUB_PATH"
+      - name: ShellCheck
+        run: shellcheck -x -P SCRIPTDIR docker/openclaw/*.sh ./*.sh .githooks/pre-push
+      - name: Hadolint
+        run: hadolint --config .hadolint.yaml Dockerfile.openclaw
+      - name: Actionlint
+        run: actionlint
 
   validator-qa:
     name: Validator Docker QA (${{ matrix.arch }})
@@ -35,40 +73,19 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
-    env:
-      OPENCLAW_PLATFORM: linux/${{ matrix.arch }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          version: "0.13.6"
+          version: "0.13.7"
           enable-cache: true
-      - name: Build OpenClaw image
-        shell: uv run --extra dev python {0}
-        run: |
-          import os
-          from pywhales import docker
-
-          docker.buildx.build(
-              ".",
-              platforms=[os.environ["OPENCLAW_PLATFORM"]],
-              load=True,
-              file="Dockerfile.openclaw",
-              tags="openclaw:ci",
-              progress="plain",
-          )
-      - name: Test OpenClaw image startup validators
-        shell: uv run --extra dev python {0}
-        run: |
-          import os
-          from pywhales import docker
-
-          print(docker.run(
-              "openclaw:ci",
-              ["openclaw", "--version"],
-              remove=True,
-              networks=["none"],
-              platform=os.environ["OPENCLAW_PLATFORM"],
-          ), end="")
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487 # v4.0.0
+      - name: Run OpenClaw validator QA
+        env:
+          OPENCLAW_QA_PLATFORMS: linux/${{ matrix.arch }}
+          OPENCLAW_QA_CACHE_FROM: type=gha,scope=openclaw-qa-${{ matrix.arch }}
+          OPENCLAW_QA_CACHE_TO: type=gha,scope=openclaw-qa-${{ matrix.arch }},mode=max
+        run: uv run --extra dev python tests/openclaw_validator_qa.py

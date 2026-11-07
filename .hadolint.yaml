@@ -1,0 +1,7 @@
+ignored:
+  # False positive: FROM base_${TARGETARCH} names a stage alias, not an unpinned image.
+  - DL3006
+  # False positive: npm@12.2.1 and the sha256-verified tarball are pinned.
+  - DL3016
+# Info-level findings (currently DL3066 for USER root / USER node) are printed but do not fail the job.
+failure-threshold: warning

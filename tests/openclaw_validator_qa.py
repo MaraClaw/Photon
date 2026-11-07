@@ -5,19 +5,40 @@ from uuid import uuid4
 
 from pywhales import docker
 
+SUPPORTED_PLATFORMS = ("linux/amd64", "linux/arm64")
+
+
+def selected_platforms(value: str | None) -> list[str]:
+    if value is None:
+        return list(SUPPORTED_PLATFORMS)
+    platforms = [item.strip() for item in value.split(",")]
+    unsupported = [item for item in platforms if item not in SUPPORTED_PLATFORMS]
+    if unsupported:
+        raise RuntimeError(
+            f"unsupported OPENCLAW_QA_PLATFORMS: {', '.join(repr(item) for item in unsupported)}; "
+            f"expected a comma list of {', '.join(SUPPORTED_PLATFORMS)}"
+        )
+    if len(set(platforms)) != len(platforms):
+        raise RuntimeError(f"duplicate OPENCLAW_QA_PLATFORMS: {value}")
+    return platforms
+
 
 def main() -> None:
     root = Path(__file__).resolve().parent.parent
     run_id = uuid4().hex
     mode = os.environ.get("OPENCLAW_ASSET_MODE", "online")
+    platforms = selected_platforms(os.environ.get("OPENCLAW_QA_PLATFORMS"))
+    cache_from = os.environ.get("OPENCLAW_QA_CACHE_FROM") or None
+    cache_to = os.environ.get("OPENCLAW_QA_CACHE_TO") or None
     contexts: dict[str, Path] = {}
     if mode == "staged":
         asset_dir = os.environ.get("OPENCLAW_ASSET_DIR", "")
         if not asset_dir:
             raise RuntimeError("OPENCLAW_ASSET_DIR is required in staged mode")
         asset_root = Path(asset_dir).expanduser().resolve()
+        architectures = [platform.removeprefix("linux/") for platform in platforms]
         required = [
-            *(asset_root / f"linux-{architecture}" / name for architecture in ("amd64", "arm64") for name in ("gogcli.tar.gz", "officecli")),
+            *(asset_root / f"linux-{architecture}" / name for architecture in architectures for name in ("gogcli.tar.gz", "officecli")),
             *(asset_root / "common" / name for name in ("officecli-SKILL.md", "gogcli-skills.tar.gz", "soul-guardian.tar.gz", "humanizer.tar.gz")),
         ]
         missing = [str(path) for path in required if not path.is_file()]
@@ -27,8 +48,8 @@ def main() -> None:
     elif mode != "online":
         raise RuntimeError(f"unsupported OPENCLAW_ASSET_MODE: {mode}")
 
-    for architecture in ("amd64", "arm64"):
-        platform = f"linux/{architecture}"
+    for platform in platforms:
+        architecture = platform.removeprefix("linux/")
         image = f"openclaw:validator-qa-{run_id}-{architecture}"
         container = f"openclaw-validator-qa-{run_id}-{architecture}"
 
@@ -44,6 +65,8 @@ def main() -> None:
                 file=root / "Dockerfile.openclaw",
                 tags=image,
                 progress="plain",
+                cache_from=cache_from,
+                cache_to=cache_to,
                 build_args={"OPENCLAW_ASSET_MODE": mode},
                 build_contexts=contexts,
             )
@@ -63,7 +86,7 @@ def main() -> None:
             print(
                 docker.run(
                     image,
-                    ["sh", "-c", 'for validator in gogcli officecli soul-guardian linkup humanizer; do "/usr/local/bin/validate-$validator.sh" true || exit; done'],
+                    ["sh", "-c", 'for validator in gogcli officecli soul-guardian tavily humanizer; do "/usr/local/bin/validate-$validator.sh" true || exit; done'],
                     name=container,
                     remove=True,
                     networks=["none"],

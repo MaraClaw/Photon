@@ -1,23 +1,25 @@
 # docker/openclaw
 
-Guest **OpenClaw agent image** helpers. Not the FastAPI API. Image contract also lives in repo-root `Dockerfile.openclaw`, `build-openclaw-local-dockerfile.sh` (local `openclaw:local` tag), and `publish-openclaw-local-dockerfile.sh` (Docker Hub `${namespace}/openclaw:${OPENCLAW_VERSION}`).
+Guest **OpenClaw agent image** helpers. Image contract also lives in repo-root `Dockerfile.openclaw`, `build-openclaw-local-dockerfile.sh` (local `openclaw:local` tag), and `publish-openclaw-local-dockerfile.sh` (Docker Hub `${namespace}/openclaw:${OPENCLAW_VERSION}`). Pin defaults live only in the `Dockerfile.openclaw` ARGs; both scripts source `openclaw-buildx-common.sh` and forward a pin only when it is set.
 
 ## Chain
 
 ```
-tini -s -- validate-gogcli.sh validate-officecli.sh validate-soul-guardian.sh validate-linkup.sh validate-humanizer.sh bootstrap-agent-container.py openclaw gateway
+tini -s -- validate-gogcli.sh validate-officecli.sh validate-soul-guardian.sh validate-tavily.sh validate-humanizer.sh bootstrap-agent-container.py openclaw gateway
 USER: node
 ```
 
 | File | When | Role |
 |---|---|---|
+| `install-common.sh` | image build | Shared staging, backup and rollback helpers sourced by every `install-*.sh`; copied beside the installers and removed after the last one |
 | `install-officecli.sh` | image build | Download pinned target binary and skill, verify both SHA256 digests, and install them into the image |
-| `install-linkup.sh` | image build | Install the bundled Linkup skills offline into the OpenClaw skills directory |
+| `install-tavily.sh` | image build | Install the bundled Tavily skills offline into the OpenClaw skills directory |
 | `install-humanizer.sh` | image build | Install the pinned Humanizer skill and upstream license from an online or staged archive |
+| `check-skills.py` | image build | Check Tavily `SKILL.md` frontmatter/metadata and soul-guardian `skill.json`/`onboard_state_dir.py` before the integrity inventory is created |
 | `validate-gogcli.sh` | entrypoint | Verify gog, optionally load `GOG_KEYRING_PASSWORD_FILE`, and exec the supplied command unchanged |
 | `validate-officecli.sh` | entrypoint | Verify OfficeCLI and exec the supplied command unchanged |
-| `validate-soul-guardian.sh` | entrypoint | Verify the skill assets and non-mutating help probe, then exec the supplied command unchanged |
-| `validate-linkup.sh` | entrypoint | Verify the two bundled Linkup skills and references offline, then exec the supplied command unchanged |
+| `validate-soul-guardian.sh` | entrypoint | Verify the skill inventory and files and the non-mutating help probe, then exec the supplied command unchanged |
+| `validate-tavily.sh` | entrypoint | Verify the two bundled Tavily skills' inventory, files and references offline, then exec the supplied command unchanged |
 | `validate-humanizer.sh` | entrypoint | Verify the Humanizer skill offline, then exec the supplied command unchanged |
 | `bootstrap-agent-container.py` | entrypoint (last), `docker exec` | Publish and enforce `AgentBootstrapCompleted` (see below); imports `bootstrap_event.py`, which owns the guest identity and the event file |
 
@@ -31,17 +33,21 @@ The engine and the image are a matched pair: an image built without this helper 
 
 ## Pins
 
-- Base: architecture-pinned `nikolaik/python-nodejs:python3.15-nodejs26-slim` with Python 3.15 and Node 26. Backend image is `python:3.15.2-slim-trixie`. Sandbox Node image is `node:26.13.0-slim`.
+Runtime skill selection policy belongs in the `*-soul.md` fragments. The Dockerfile composes them into `/usr/local/share/openclaw/skills-soul.md` for engine-created workspaces and OpenClaw's default `SOUL.md` for standalone workspaces. Keep discovery metadata in each skill, execution guidance in its body, and API schemas in its references; avoid repeating selection policy there.
+
+- Base: architecture-pinned `nikolaik/python-nodejs:python3.15-nodejs26-slim` with Python 3.15 and Node 26.
 - gogcli supports **linux/amd64 and linux/arm64**, each with its own pinned digest. `build-openclaw-local-dockerfile.sh` uses **docker buildx --load** for one `DOCKER_PLATFORM` (default `linux/arm64`); other targets fail explicitly.
-- Publish requires `DOCKERHUB_NAMESPACE` or `OPENCLAW_PUBLISH_IMAGE` and an existing `docker login`. It builds both platforms with **docker buildx --push** under `${repo}:${IMAGE_TAG}` (default `OPENCLAW_VERSION`), adding `:latest` only when `PUSH_LATEST=1`. It does not load or retag a local image.
+- Publish requires `DOCKERHUB_NAMESPACE` or `OPENCLAW_PUBLISH_IMAGE` and an existing `docker login`. It builds both platforms with **docker buildx --push** under `${repo}:${IMAGE_TAG}` (default `OPENCLAW_VERSION`, else the Dockerfile's `ARG OPENCLAW_VERSION`) with max-mode provenance and an SBOM attestation, adding `:latest` only when `PUSH_LATEST=1`. It does not load or retag a local image.
 - OfficeCLI and its skill are baked into the image; startup never downloads them or changes OpenClaw state or configuration.
 - Soul Guardian is baked into the image; startup validates it without initializing state or enabling monitoring.
-- Linkup skills are installed from `linkup-skills/` at build time; startup validates them offline without credentials.
+- Tavily skills are installed from `tavily-skills/` at build time; startup validates them offline without credentials.
 - Humanizer is installed at build time with installer-owned archive pins; startup validates it offline.
-- OpenClaw is installed from its checksum-verified pinned npm archive without local memory-provider patches.
+- OpenClaw lives in `/opt/openclaw/node_modules/openclaw` (not the global npm root), installed by `npm ci` from `openclaw-package/package-lock.json` after its archive is checked against `OPENCLAW_SHA256` and the lock integrity, without local memory-provider patches. Only OpenClaw's own install scripts run, approved through `allowScripts` in that `package.json`.
+- Apt resolves from `snapshot.debian.org` at the `DEBIAN_SNAPSHOT` ARG; a pin bump may need a newer snapshot.
+- Releases come from `.github/workflows/release.yml` on `openclaw-v<version>` tags and are cosign-signed keyless by digest.
 
 ## Avoid
 
-- Do not put `GOG_KEYRING_PASSWORD` in Docker env/args; file path only.
+- Do not put `GOG_KEYRING_PASSWORD` in Docker env/args; file path only. `validate-gogcli.sh` exports it from that file, so the gateway and its children inherit it (the engine smoke tests assert this).
 - Image tests live in Photon `tests/`; gogcli product docs and routing tests remain in MaraClaw engine.
 - Guest LLM is whatever `openclaw.json` names. Engine writes primary + registered secondary/fallback at container start, then `openclaw_routing` rewrites the selected primary per queued turn. The gateway watches that file (hot reload). Do not add a second classifier inside the image.

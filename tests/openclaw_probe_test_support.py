@@ -28,7 +28,7 @@ def prepare_integrity(root: Path, skills: Path, env: dict[str, str], script: Pat
         binary = binaries / name
         if not binary.exists():
             binary.write_text("fixture\n")
-    for name in ("gog", "crabbox", "officecli", "soul-guardian", "linkup-search", "linkup-fetch", "humanizer"):
+    for name in ("gog", "crabbox", "officecli", "soul-guardian", "tavily-search", "tavily-crawl", "humanizer"):
         directory = skills / name
         directory.mkdir(parents=True, exist_ok=True)
         if not any(directory.iterdir()):
@@ -131,7 +131,7 @@ def install_hang(root: Path, env: dict[str, str], target: Path, *, python_probe:
     command = f"exec {shlex.quote(sys.executable)} {shlex.quote(str(actor))}"
     if python_probe:
         target.unlink(missing_ok=True)
-        pattern = "-c" if python_probe == "compile" else "*soul_guardian.py"
+        pattern = "*installed-assets.py" if python_probe == "integrity" else "*soul_guardian.py"
         target.write_text(
             f'#!/bin/sh\nif [ "$1" = "-B" ]; then\n'
             f'  case "$2" in {pattern}) {command} ;; esac\nfi\n'
@@ -194,7 +194,8 @@ def assert_gone(pids: list[int]) -> None:
 
 
 def exercise_timeout(script: Path, env: dict[str, str]) -> None:
-    env.update({POLICY_KEYS[0]: "0.5", POLICY_KEYS[1]: "0.1"})
+    # The deadline includes interpreter startup and the actor's fork/readiness handshake.
+    env.update({POLICY_KEYS[0]: "2", POLICY_KEYS[1]: "0.1"})
     child_marker = Path(env["PROBE_READY"]).parent / "delegated"
     with validator_process(script, env, "/bin/sh", "-c", f'touch {shlex.quote(str(child_marker))}') as (process, ready):
         pids = readiness(ready)
@@ -226,7 +227,7 @@ def exercise_invalid_policy(script: Path, env: dict[str, str], key: str, value: 
 
 
 def exercise_final_child(script: Path, env: dict[str, str]) -> None:
-    env.update({POLICY_KEYS[0]: "0.5", POLICY_KEYS[1]: "0.1"})
+    env.update({POLICY_KEYS[0]: "2", POLICY_KEYS[1]: "0.1"})
     fifo = Path(env["PROBE_READY"])
     env["TMPDIR"] = str(fifo.parent)
     child = fifo.parent / "long_child.py"
@@ -247,7 +248,7 @@ def exercise_final_child(script: Path, env: dict[str, str]) -> None:
         assert pid == process.pid
         assert received == arguments
         with pytest.raises(subprocess.TimeoutExpired):
-            process.wait(timeout=1.6)
+            process.wait(timeout=2.5)
         processes = subprocess.run(["ps", "-eo", "ppid=,pid="], capture_output=True, text=True, timeout=5, check=True)
         assert not [line for line in processes.stdout.splitlines() if int(line.split()[0]) == process.pid]
         assert not list(fifo.parent.glob("openclaw-probe.*"))

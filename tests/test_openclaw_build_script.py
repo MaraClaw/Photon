@@ -10,8 +10,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 BUILD_SCRIPT = REPO_ROOT / "build-openclaw-local-dockerfile.sh"
 DOCKERFILE = REPO_ROOT / "Dockerfile.openclaw"
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
-OPENCLAW_VERSION = "2026.10.10"
-OPENCLAW_SHA256 = "sha256:e811c18281812a409e29a681ada7faf7100560020e144fbdf18889fab2c7cf06"
+OPENCLAW_VERSION = "2026.11.1"
+OPENCLAW_SHA256 = "sha256:611282534d576e12f10b0ac5a1ac0d2825aac360637e92815a56eb71fb5a0301"
 GOGCLI_VERSION = "0.47.1"
 GOGCLI_ARM64_SHA256 = "sha256:c677ac6abf5e187e987a87fe1b588f454b002a7d7019de81b9e8db02e9e902b6"
 GOGCLI_AMD64_SHA256 = "sha256:279bc3a03c1919d774e268ef229949f45b753a0e21257f9fb315b05be7a40ea9"
@@ -21,6 +21,21 @@ OFFICECLI_PINS = {
     "OFFICECLI_AMD64_SHA256": "baa084b64ec634bd9d41a0592db3ed85f11658b358bab898679537ea7f3e73a9",
     "OFFICECLI_SKILL_SHA256": "c950d285ce60021712b4753fb2d9f592308d5622bab776229061dfecb1ce55d4",
 }
+PIN_NAMES = (
+    "OPENCLAW_VERSION",
+    "OPENCLAW_SHA256",
+    "DEBIAN_SNAPSHOT",
+    "GOGCLI_VERSION",
+    "GOGCLI_AMD64_SHA256",
+    "GOGCLI_ARM64_SHA256",
+    *OFFICECLI_PINS,
+    "GOGCLI_SKILLS_COMMIT",
+    "GOGCLI_SKILLS_SHA256",
+    "CLAWSEC_COMMIT",
+    "CLAWSEC_SHA256",
+    "HUMANIZER_COMMIT",
+    "HUMANIZER_SHA256",
+)
 ARCHIVE_PIN_NAMES = ("GOGCLI_SKILLS_COMMIT", "GOGCLI_SKILLS_SHA256", "CLAWSEC_COMMIT", "CLAWSEC_SHA256", "HUMANIZER_COMMIT", "HUMANIZER_SHA256")
 
 
@@ -38,6 +53,28 @@ def forwarded_archive_pins(argv: list[str]) -> dict[str, str]:
     }
     assert sum(argument.startswith(tuple(f"{name}=" for name in ARCHIVE_PIN_NAMES)) for argument in argv) == len(pins)
     return pins
+
+
+def forwarded_pins(argv: list[str]) -> dict[str, str]:
+    pins = {
+        name: value
+        for flag, assignment in zip(argv, argv[1:], strict=False)
+        if flag == "--build-arg"
+        for name, _, value in (assignment.partition("="),)
+        if name in PIN_NAMES
+    }
+    assert sum(argument.startswith(tuple(f"{name}=" for name in PIN_NAMES)) for argument in argv) == len(pins)
+    return pins
+
+
+def dockerfile_arg_defaults() -> dict[str, str]:
+    return {
+        name: value
+        for line in DOCKERFILE.read_text(encoding="utf-8").splitlines()
+        if line.startswith("ARG ")
+        for name, separator, value in (line.removeprefix("ARG ").partition("="),)
+        if separator
+    }
 
 
 def write_env_file(path: Path, assignments: dict[str, str]) -> None:
@@ -65,7 +102,7 @@ def build_env(bin_dir: Path, log_path: Path, missing_env_file: Path) -> dict[str
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
     env.pop("MARACLAW_OPENCLAW_IMAGE", None)
     env.pop("DOCKER_PLATFORM", None)
-    for name in (*OFFICECLI_PINS, *ARCHIVE_PIN_NAMES):
+    for name in PIN_NAMES:
         env.pop(name, None)
     return env
 
@@ -175,7 +212,7 @@ def test_openclaw_build_script_rejects_unknown_arguments_before_env_and_docker(
     assert not log_path.exists()
 
 
-def test_openclaw_build_script_passes_default_openclaw_version_and_sha(tmp_path: Path) -> None:
+def test_openclaw_build_script_forwards_no_pins_by_default_so_dockerfile_defaults_apply(tmp_path: Path) -> None:
     # Given
     bin_dir, log_path = install_fake_docker(tmp_path)
     env = build_env(bin_dir, log_path, tmp_path / "missing.env")
@@ -184,14 +221,15 @@ def test_openclaw_build_script_passes_default_openclaw_version_and_sha(tmp_path:
     result = run_build_script(env)
 
     # Then
-    command = log_path.read_text(encoding="utf-8")
     assert result.returncode == 0, result.stderr
-    assert f"--build-arg OPENCLAW_VERSION={OPENCLAW_VERSION}" in command
-    assert f"--build-arg OPENCLAW_SHA256={OPENCLAW_SHA256}" in command
+    assert forwarded_pins(read_docker_argv(log_path)) == {}
+    defaults = dockerfile_arg_defaults()
+    assert defaults["OPENCLAW_VERSION"] == OPENCLAW_VERSION
+    assert defaults["OPENCLAW_SHA256"] == OPENCLAW_SHA256
 
 
 @pytest.mark.parametrize("platform", ["linux/amd64", "linux/arm64"])
-def test_openclaw_build_script_loads_one_target_with_per_arch_pins(tmp_path: Path, platform: str) -> None:
+def test_openclaw_build_script_loads_one_target_without_attestations(tmp_path: Path, platform: str) -> None:
     # Given
     bin_dir, log_path = install_fake_docker(tmp_path)
     env = build_env(bin_dir, log_path, tmp_path / "missing.env")
@@ -203,35 +241,33 @@ def test_openclaw_build_script_loads_one_target_with_per_arch_pins(tmp_path: Pat
     # Then
     command = log_path.read_text(encoding="utf-8")
     assert result.returncode == 0, result.stderr
-    assert f"--build-arg GOGCLI_VERSION={GOGCLI_VERSION}" in command
-    assert f"--build-arg GOGCLI_AMD64_SHA256={GOGCLI_AMD64_SHA256}" in command
-    assert f"--build-arg GOGCLI_ARM64_SHA256={GOGCLI_ARM64_SHA256}" in command
     assert command.count("--platform") == 1
     assert f"--platform {platform}" in command
     assert "--load" in command
     assert "--push" not in command
+    assert "--provenance" not in command
+    assert "--sbom" not in command
 
 
-def test_environment_example_pins_openclaw_and_gogcli_releases() -> None:
+def test_environment_example_lists_dockerfile_pin_defaults_as_commented_overrides() -> None:
     # Given
-    expected_pins = {
-        "OPENCLAW_VERSION": OPENCLAW_VERSION,
-        "OPENCLAW_SHA256": OPENCLAW_SHA256,
-        "GOGCLI_VERSION": GOGCLI_VERSION,
-        **OFFICECLI_PINS,
-    }
-    content = ENV_EXAMPLE.read_text(encoding="utf-8")
+    pin_names = ("OPENCLAW_VERSION", "OPENCLAW_SHA256", "DEBIAN_SNAPSHOT", "GOGCLI_VERSION", "GOGCLI_AMD64_SHA256", "GOGCLI_ARM64_SHA256", *OFFICECLI_PINS)
+    lines = ENV_EXAMPLE.read_text(encoding="utf-8").splitlines()
 
     # When
-    example_pins = {
+    active = [line for line in lines if line.partition("=")[0] in PIN_NAMES]
+    commented = {
         key: value
-        for line in content.splitlines()
-        for key, separator, value in (line.partition("="),)
-        if separator and key in expected_pins
+        for line in lines
+        if line.startswith("# ")
+        for key, separator, value in (line.removeprefix("# ").partition("="),)
+        if separator and key in pin_names
     }
 
     # Then
-    assert example_pins == expected_pins
+    assert active == []
+    assert commented == {name: dockerfile_arg_defaults()[name] for name in pin_names}
+    assert "Dockerfile.openclaw" in "\n".join(lines)
 
 
 def test_openclaw_build_script_passes_configured_openclaw_version_and_sha(tmp_path: Path) -> None:
@@ -334,7 +370,8 @@ def test_openclaw_dockerfile_uses_shell_that_preserves_bash_package_version_argu
 def test_openclaw_dockerfile_verifies_openclaw_npm_tarball_before_install() -> None:
     # Given
     content = DOCKERFILE.read_text(encoding="utf-8")
-    install_command = 'npm install -g --allow-scripts="$OPENCLAW_TARBALL" "$OPENCLAW_TARBALL"'
+    install_command = "npm ci --prefix /opt/openclaw --install-strategy=shallow --omit=dev --no-audit --no-fund"
+    lock_check = "sha512sum -c /tmp/openclaw.lock.sha512"
 
     # When
     checksum_block = "\n".join(
@@ -350,9 +387,11 @@ def test_openclaw_dockerfile_verifies_openclaw_npm_tarball_before_install() -> N
     assert 'printf \'%s  %s\\n\' "${OPENCLAW_SHA256#sha256:}" "$OPENCLAW_TARBALL"' in checksum_block
     assert "sha256sum -c /tmp/openclaw.tgz.sha256" in checksum_block
     assert install_command in checksum_block
-    assert content.index("sha256sum -c /tmp/openclaw.tgz.sha256") < content.index(install_command)
+    assert lock_check in checksum_block
+    assert content.index("sha256sum -c /tmp/openclaw.tgz.sha256") < content.index(lock_check) < content.index(install_command)
     assert content.index(install_command) < content.index("\nUSER node\n")
     assert "--dangerously-allow-all-scripts" not in content
+    assert "npm install -g --allow-scripts" not in content
     assert 'npm install -g "openclaw@${OPENCLAW_VERSION}"' not in content
 
 
@@ -378,6 +417,7 @@ def test_openclaw_dockerfile_pins_and_verifies_gogcli_release_archive() -> None:
     assert "printf '%s  %s\\n' \"${GOGCLI_SHA256#sha256:}\" \"$GOGCLI_ARCHIVE\"" in gogcli_block
     assert "sha256sum -c /tmp/gogcli.tar.gz.sha256" in gogcli_block
     assert 'tar -xzf "$GOGCLI_ARCHIVE" -C /usr/local/bin ./gog' in gogcli_block
+    assert "online) curl --disable --config /dev/null --fail --silent --show-error --location --proto '=https' --proto-redir '=https'" in content
 
 
 @pytest.mark.parametrize("architecture", ["amd64", "arm64"])

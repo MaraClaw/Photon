@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 
+# shellcheck source=install-common.sh
+. "$(dirname -- "$0")/install-common.sh"
+
 OFFICECLI_VERSION="${OFFICECLI_VERSION:-v1.0.160}"
 OFFICECLI_ARM64_SHA256="${OFFICECLI_ARM64_SHA256:-e8f06aff6c59f11a73a1a1218bda3ce170299201fd56bce6d62ecd4d0c024e53}"
 OFFICECLI_AMD64_SHA256="${OFFICECLI_AMD64_SHA256:-baa084b64ec634bd9d41a0592db3ed85f11658b358bab898679537ea7f3e73a9}"
@@ -27,74 +30,46 @@ case "${TARGETOS:-}/${TARGETARCH:-}" in
     *) printf 'unsupported OfficeCLI target: %s/%s\n' "${TARGETOS:-}" "${TARGETARCH:-}" >&2; exit 2 ;;
 esac
 
-stage="$(mktemp -d "${TMPDIR:-/tmp}/officecli.XXXXXXXXXX")"
 binary_destination=/usr/local/bin/officecli
 skill_destination=
 binary_touched=0
 skill_touched=0
-binary_saved=0
-skill_saved=0
 committed=0
 restore_failed=0
 restore_path() {
     if ! rm -rf -- "$1"; then
         printf 'OfficeCLI rollback could not remove %s\n' "$1" >&2
         restore_failed=1
-    elif [ "$2" = 1 ] && ! cp -a -- "$3" "$1"; then
+    elif { [ -e "$2" ] || [ -L "$2" ]; } && ! cp -a -- "$2" "$1"; then
         printf 'OfficeCLI rollback could not restore %s\n' "$1" >&2
         restore_failed=1
     fi
 }
-finish() {
-    status=$?
-    trap - EXIT
-    trap '' HUP INT TERM
-    if [ "$committed" = 0 ]; then
-        if [ "$skill_touched" = 1 ]; then
-            restore_path "$skill_destination" "$skill_saved" "$stage/backup/skill"
-        fi
-        if [ "$binary_touched" = 1 ]; then
-            restore_path "$binary_destination" "$binary_saved" "$stage/backup/officecli"
-        fi
+install_rollback() {
+    [ "$committed" = 0 ] || return 0
+    if [ "$skill_touched" = 1 ]; then
+        restore_path "$skill_destination" "$stage/backup/skill"
     fi
-    if [ "$restore_failed" = 1 ]; then
-        printf 'OfficeCLI rollback failed; backups retained at %s\n' "$stage" >&2
-        exit 1
+    if [ "$binary_touched" = 1 ]; then
+        restore_path "$binary_destination" "$stage/backup/officecli"
     fi
-    if ! rm -rf -- "$stage"; then
-        printf 'OfficeCLI temporary data could not be removed: %s\n' "$stage" >&2
-        exit 1
-    fi
-    exit "$status"
+    return "$restore_failed"
 }
-trap finish EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
-curl_safe() {
-    curl --disable --config /dev/null --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
-        --connect-timeout 15 --max-time 120 --retry 2 --retry-delay 1 --retry-max-time 60 --noproxy '*' "$@"
-}
+install_stage_init officecli.XXXXXXXXXX 'OfficeCLI rollback failed; backups' 'OfficeCLI temporary data could not be removed:'
 if [ -n "$binary_file" ]; then
     cp -- "$binary_file" "$stage/officecli"
     cp -- "$skill_file" "$stage/SKILL.md"
 else
-    curl_safe -o "$stage/officecli" "https://github.com/iOfficeAI/OfficeCLI/releases/download/$OFFICECLI_VERSION/$asset"
-    curl_safe -o "$stage/SKILL.md" "https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/$OFFICECLI_VERSION/SKILL.md"
+    install_fetch "$stage/officecli" "https://github.com/iOfficeAI/OfficeCLI/releases/download/$OFFICECLI_VERSION/$asset"
+    install_fetch "$stage/SKILL.md" "https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/$OFFICECLI_VERSION/SKILL.md"
 fi
 printf '%s  %s\n%s  %s\n' "${digest#sha256:}" "$stage/officecli" "${OFFICECLI_SKILL_SHA256#sha256:}" "$stage/SKILL.md" | sha256sum -c -
 install -d -m 0755 "$stage/payload/skill" "$stage/backup"
 install -m 0755 "$stage/officecli" "$stage/payload/officecli"
 install -m 0644 "$stage/SKILL.md" "$stage/payload/skill/SKILL.md"
 skill_destination="$HOME/.openclaw/skills/officecli"
-if [ -e "$binary_destination" ] || [ -L "$binary_destination" ]; then
-    cp -a -- "$binary_destination" "$stage/backup/officecli"
-    binary_saved=1
-fi
-if [ -e "$skill_destination" ] || [ -L "$skill_destination" ]; then
-    cp -a -- "$skill_destination" "$stage/backup/skill"
-    skill_saved=1
-fi
+install_save "$binary_destination" "$stage/backup/officecli"
+install_save "$skill_destination" "$stage/backup/skill"
 skill_parent="$(dirname "$skill_destination")"
 if [ ! -d "$skill_parent" ]; then
     install -d -m 0755 "$skill_parent"

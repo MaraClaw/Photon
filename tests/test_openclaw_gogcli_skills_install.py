@@ -33,6 +33,7 @@ def install_fixture(tmp_path: Path) -> tuple[Path, dict[str, str]]:
         tar.add(source, arcname=f"gogcli-{COMMIT}/.agents/skills")
     script = tmp_path / "installer.sh"
     shutil.copy(INSTALLER, script)
+    shutil.copy(INSTALLER.with_name("install-common.sh"), tmp_path / "install-common.sh")
     script.chmod(0o755)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()

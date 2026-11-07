@@ -1,0 +1,12 @@
+{
+  "name": "openclaw-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Locked dependency tree for the OpenClaw guest image; see Dockerfile.openclaw.",
+  "dependencies": {
+    "openclaw": "2026.11.1"
+  },
+  "allowScripts": {
+    "openclaw": true
+  }
+}
