@@ -1,5 +1,7 @@
 #!/bin/sh
 
+# Sourced by validate-*.sh, which set probe_dir.
+# shellcheck disable=SC2154
 probe_helper=$probe_dir/startup-probe.py
 probe_pid=
 probe_file=
@@ -128,9 +130,3 @@ probe_control_owned=1
 exec 4>"$probe_control"
 probe_channel_ready=1
 probe_check_cancelled
-python3 -B "$probe_helper" --check-policy 3<"$probe_control" >/dev/null &
-if probe_wait; then
-    :
-else
-    exit "$probe_status"
-fi

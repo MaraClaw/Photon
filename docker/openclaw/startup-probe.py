@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Supervise one startup probe, never the validator's final command."""
 
+import contextlib
 import ctypes
 import math
 import os
@@ -10,6 +11,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from types import FrameType
 
 
@@ -86,6 +88,66 @@ def signal_group(pgid: int, signum: int) -> None:
             raise
 
 
+def live_processes() -> list[tuple[int, int, int]]:
+    """(pid, ppid, pgrp) of every non-zombie process visible in /proc."""
+    processes = []
+    for entry in os.scandir("/proc"):
+        if not entry.name.isdigit():
+            continue
+        try:
+            raw = Path(entry.path, "stat").read_bytes()
+        except OSError:
+            continue
+        # comm may hold spaces and parentheses: state, ppid and pgrp follow the last ")".
+        state, ppid, pgrp = raw.rpartition(b")")[2].split()[:3]
+        if state != b"Z":
+            processes.append((int(entry.name), int(ppid), int(pgrp)))
+    return processes
+
+
+def group_alive(pgid: int) -> bool:
+    """Whether a member of the probe's group can still run; zombies awaiting reaping cannot."""
+    if sys.platform.startswith("linux"):
+        return any(pgrp == pgid for _, _, pgrp in live_processes())
+    try:
+        os.killpg(pgid, 0)
+    except (ProcessLookupError, PermissionError):
+        # Darwin refuses to signal a group holding only zombies.
+        return False
+    return True
+
+
+def wait_group(pgid: int, deadline: float) -> None:
+    while time.monotonic() < deadline and group_alive(pgid):
+        time.sleep(min(0.02, max(0, deadline - time.monotonic())))
+
+
+def reap_escaped(grace: float) -> None:
+    """Reap descendants that escaped the probe's group: TERM, KILL after the grace, give up after another."""
+    deadline = time.monotonic() + grace
+    give_up = deadline + grace
+    signum = signal.SIGTERM
+    signalled: set[int] = set()
+    while True:
+        try:
+            if os.waitpid(-1, os.WNOHANG)[0]:
+                continue
+        except ChildProcessError:
+            return
+        now = time.monotonic()
+        if now >= give_up:
+            return
+        if now >= deadline:
+            signum = signal.SIGKILL
+            signalled.clear()
+        for pid, ppid, _ in live_processes():
+            if ppid == os.getpid() and pid not in signalled:
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, signum)
+                signalled.add(pid)
+        time.sleep(0.02)
+
+
 def supervise(command: list[str], policy: Policy, cancellation: Cancellation) -> int:
     enable_subreaper()
     if cancellation.check():
@@ -113,17 +175,11 @@ def supervise(command: list[str], policy: Policy, cancellation: Cancellation) ->
     finally:
         signal_group(process.pid, signal.SIGTERM)
         if timed_out or cancellation.check():
-            grace_deadline = time.monotonic() + policy.grace
-            while time.monotonic() < grace_deadline:
-                time.sleep(min(0.02, max(0, grace_deadline - time.monotonic())))
+            wait_group(process.pid, time.monotonic() + policy.grace)
         signal_group(process.pid, signal.SIGKILL)
         status = process.wait()
         if sys.platform.startswith("linux"):
-            while True:
-                try:
-                    os.waitpid(-1, 0)
-                except ChildProcessError:
-                    break
+            reap_escaped(policy.grace)
     if cancellation.check():
         return 128 + cancellation.signum
     if timed_out:
@@ -139,8 +195,6 @@ def main() -> int:
     signal.signal(signal.SIGCHLD, signal.SIG_DFL)
     try:
         policy = Policy.from_environment()
-        if sys.argv[1:] == ["--check-policy"]:
-            return 128 + cancellation.signum if cancellation.check() else 0
         return supervise(sys.argv[2:], policy, cancellation)
     except PolicyError as error:
         print(error, file=sys.stderr)
