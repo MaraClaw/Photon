@@ -2,6 +2,7 @@
 !Dockerfile.openclaw
 !docker/
 !docker/openclaw/
+!docker/openclaw/install-common.sh
 !docker/openclaw/install-officecli.sh
 !docker/openclaw/install-gogcli-skills.sh
 !docker/openclaw/install-soul-guardian.sh
@@ -11,6 +12,7 @@
 !docker/openclaw/soul-guardian-soul.md
 !docker/openclaw/tavily-soul.md
 !docker/openclaw/install-tavily.sh
+!docker/openclaw/check-skills.py
 !docker/openclaw/validate-gogcli.sh
 !docker/openclaw/validate-officecli.sh
 !docker/openclaw/validate-soul-guardian.sh
@@ -21,5 +23,7 @@
 !docker/openclaw/bootstrap_event.py
 !docker/openclaw/bootstrap-agent-container.py
 !docker/openclaw/installed-assets.py
+!docker/openclaw/openclaw-package/package.json
+!docker/openclaw/openclaw-package/package-lock.json
 !docker/openclaw/tavily-skills/
 !docker/openclaw/tavily-skills/**

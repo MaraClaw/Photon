@@ -11,6 +11,7 @@ ARG TARGETARCH
 ARG OPENCLAW_ASSET_MODE=online
 ARG OPENCLAW_VERSION=2026.11.1
 ARG OPENCLAW_SHA256=sha256:611282534d576e12f10b0ac5a1ac0d2825aac360637e92815a56eb71fb5a0301
+ARG DEBIAN_SNAPSHOT=20261027T000000Z
 ARG TINI_VERSION=0.19.0-3+b8
 ARG CA_CERTIFICATES_VERSION=20250419+deb13u1
 ARG CURL_VERSION=8.14.1-2+deb13u7
@@ -32,8 +33,14 @@ ARG HUMANIZER_COMMIT
 ARG HUMANIZER_SHA256
 
 USER root
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
+RUN --mount=type=bind,source=docker/openclaw/openclaw-package,target=/tmp/openclaw-package \
+    sed -i \
+        -e "s#http://deb.debian.org/debian-security#https://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}#" \
+        -e "s#http://deb.debian.org/debian#https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}#" \
+        -e '/^URIs:/a Check-Valid-Until: no' \
+        /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Retries=3 update \
+    && apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
     "bash=${BASH_VERSION}" \
     "ca-certificates=${CA_CERTIFICATES_VERSION}" \
     "curl=${CURL_VERSION}" \
@@ -42,13 +49,20 @@ RUN apt-get update \
     "tini=${TINI_VERSION}" \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g npm@12.2.1 \
+    && install -D -m 0644 -t /opt/openclaw /tmp/openclaw-package/package.json /tmp/openclaw-package/package-lock.json \
+    && LOCKED_VERSION=$(node -p 'require("/opt/openclaw/package-lock.json").packages["node_modules/openclaw"].version') \
+    && if [ "$LOCKED_VERSION" != "$OPENCLAW_VERSION" ]; then printf 'OPENCLAW_VERSION=%s does not match the openclaw version %s locked in docker/openclaw/openclaw-package/package-lock.json\n' "$OPENCLAW_VERSION" "$LOCKED_VERSION" >&2; exit 1; fi \
     && npm pack "openclaw@${OPENCLAW_VERSION}" --pack-destination /tmp \
     && OPENCLAW_TARBALL="/tmp/openclaw-${OPENCLAW_VERSION}.tgz" \
     && test -f "$OPENCLAW_TARBALL" \
     && printf '%s  %s\n' "${OPENCLAW_SHA256#sha256:}" "$OPENCLAW_TARBALL" > /tmp/openclaw.tgz.sha256 \
     && sha256sum -c /tmp/openclaw.tgz.sha256 \
-    && npm install -g --allow-scripts="$OPENCLAW_TARBALL" "$OPENCLAW_TARBALL" \
-    && rm -f "$OPENCLAW_TARBALL" /tmp/openclaw.tgz.sha256 \
+    && LOCKED_SHA512=$(node -p 'Buffer.from(require("/opt/openclaw/package-lock.json").packages["node_modules/openclaw"].integrity.slice(7), "base64").toString("hex")') \
+    && printf '%s  %s\n' "$LOCKED_SHA512" "$OPENCLAW_TARBALL" > /tmp/openclaw.lock.sha512 \
+    && sha512sum -c /tmp/openclaw.lock.sha512 \
+    && npm ci --prefix /opt/openclaw --install-strategy=shallow --omit=dev --no-audit --no-fund \
+    && ln -s /opt/openclaw/node_modules/.bin/openclaw /usr/local/bin/openclaw \
+    && rm -f "$OPENCLAW_TARBALL" /tmp/openclaw.tgz.sha256 /tmp/openclaw.lock.sha512 \
     && rm -rf /root/.npm
 
 RUN groupmod -n node pn \
@@ -63,7 +77,8 @@ RUN --mount=type=bind,from=openclaw_assets,target=/staged case "$TARGETOS/$TARGE
         *) printf 'unsupported guest target: %s/%s\n' "$TARGETOS" "$TARGETARCH" >&2; exit 2 ;; \
     esac \
     && case "$OPENCLAW_ASSET_MODE" in \
-        online) curl -fsSL \
+        online) curl --disable --config /dev/null --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+            --connect-timeout 15 --max-time 120 --retry 2 --retry-delay 1 --retry-max-time 60 --noproxy '*' \
             "https://github.com/openclaw/gogcli/releases/download/v${GOGCLI_VERSION}/gogcli_${GOGCLI_VERSION}_${TARGETOS}_${TARGETARCH}.tar.gz" \
             -o /tmp/gogcli.tar.gz && GOGCLI_ARCHIVE=/tmp/gogcli.tar.gz ;; \
         staged) GOGCLI_ARCHIVE="/staged/linux-${TARGETARCH}/gogcli.tar.gz" ;; \
@@ -80,6 +95,7 @@ ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     OFFICECLI_SKIP_UPDATE=1 \
     OFFICECLI_NO_AUTO_RESIDENT=1
 
+COPY docker/openclaw/install-common.sh /tmp/install-common.sh
 COPY docker/openclaw/install-officecli.sh /tmp/install-officecli.sh
 RUN --mount=type=bind,from=openclaw_assets,target=/staged \
     case "$OPENCLAW_ASSET_MODE" in \
@@ -113,7 +129,7 @@ COPY docker/openclaw/humanizer-soul.md /tmp/humanizer-soul.md
 COPY docker/openclaw/officecli-soul.md /tmp/officecli-soul.md
 COPY docker/openclaw/soul-guardian-soul.md /tmp/soul-guardian-soul.md
 COPY docker/openclaw/tavily-soul.md /tmp/tavily-soul.md
-RUN template="$(npm root -g)/openclaw/docs/reference/templates/SOUL.md" \
+RUN template="/opt/openclaw/node_modules/openclaw/docs/reference/templates/SOUL.md" \
     && test -s "$template" \
     && install -d -m 0755 /usr/local/share/openclaw \
     && cat /tmp/humanizer-soul.md /tmp/officecli-soul.md /tmp/soul-guardian-soul.md /tmp/tavily-soul.md > /usr/local/share/openclaw/skills-soul.md \
@@ -122,23 +138,23 @@ RUN template="$(npm root -g)/openclaw/docs/reference/templates/SOUL.md" \
     && rm /tmp/humanizer-soul.md /tmp/officecli-soul.md /tmp/soul-guardian-soul.md /tmp/tavily-soul.md
 COPY docker/openclaw/tavily-skills/ /tmp/tavily-skills/
 COPY docker/openclaw/install-tavily.sh /tmp/install-tavily.sh
-RUN sh /tmp/install-tavily.sh && rm /tmp/install-tavily.sh
+RUN sh /tmp/install-tavily.sh && rm /tmp/install-tavily.sh /tmp/install-common.sh
+COPY docker/openclaw/check-skills.py /tmp/check-skills.py
+RUN python3 /tmp/check-skills.py --skills-root "$HOME/.openclaw/skills" && rm /tmp/check-skills.py
 COPY docker/openclaw/installed-assets.py /usr/local/bin/installed-assets.py
 RUN python3 /usr/local/bin/installed-assets.py create \
     --skills-root "$HOME/.openclaw/skills" \
     --gog-roots-file /usr/local/share/openclaw-integrity/gog-skill-roots.txt \
     --output-dir /usr/local/share/openclaw-integrity
-COPY docker/openclaw/validate-gogcli.sh /usr/local/bin/validate-gogcli.sh
-RUN chmod 0755 /usr/local/bin/validate-gogcli.sh
-COPY docker/openclaw/validate-officecli.sh /usr/local/bin/validate-officecli.sh
-COPY docker/openclaw/validate-soul-guardian.sh /usr/local/bin/validate-soul-guardian.sh
-COPY docker/openclaw/validate-tavily.sh /usr/local/bin/validate-tavily.sh
-COPY docker/openclaw/validate-humanizer.sh /usr/local/bin/validate-humanizer.sh
-COPY docker/openclaw/startup-probe.sh /usr/local/bin/startup-probe.sh
-COPY docker/openclaw/startup-probe.py /usr/local/bin/startup-probe.py
-COPY docker/openclaw/bootstrap_event.py /usr/local/bin/bootstrap_event.py
-COPY docker/openclaw/bootstrap-agent-container.py /usr/local/bin/bootstrap-agent-container.py
-RUN chmod 0755 /usr/local/bin/validate-officecli.sh /usr/local/bin/validate-soul-guardian.sh /usr/local/bin/validate-tavily.sh /usr/local/bin/validate-humanizer.sh /usr/local/bin/startup-probe.sh /usr/local/bin/startup-probe.py /usr/local/bin/bootstrap_event.py /usr/local/bin/bootstrap-agent-container.py
+COPY --chmod=0755 docker/openclaw/validate-gogcli.sh /usr/local/bin/validate-gogcli.sh
+COPY --chmod=0755 docker/openclaw/validate-officecli.sh /usr/local/bin/validate-officecli.sh
+COPY --chmod=0755 docker/openclaw/validate-soul-guardian.sh /usr/local/bin/validate-soul-guardian.sh
+COPY --chmod=0755 docker/openclaw/validate-tavily.sh /usr/local/bin/validate-tavily.sh
+COPY --chmod=0755 docker/openclaw/validate-humanizer.sh /usr/local/bin/validate-humanizer.sh
+COPY --chmod=0755 docker/openclaw/startup-probe.sh /usr/local/bin/startup-probe.sh
+COPY --chmod=0755 docker/openclaw/startup-probe.py /usr/local/bin/startup-probe.py
+COPY --chmod=0755 docker/openclaw/bootstrap_event.py /usr/local/bin/bootstrap_event.py
+COPY --chmod=0755 docker/openclaw/bootstrap-agent-container.py /usr/local/bin/bootstrap-agent-container.py
 
 USER node
 ENTRYPOINT ["tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh", "/usr/local/bin/validate-officecli.sh", "/usr/local/bin/validate-soul-guardian.sh", "/usr/local/bin/validate-tavily.sh", "/usr/local/bin/validate-humanizer.sh", "/usr/local/bin/bootstrap-agent-container.py"]

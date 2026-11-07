@@ -71,16 +71,13 @@ def test_image_installs_pinned_cli_and_runs_validator_as_entrypoint() -> None:
     assert "COPY docker/openclaw/install-officecli.sh /tmp/install-officecli.sh" in lines
     assert "online) sh /tmp/install-officecli.sh ;;" in source
     assert 'staged) sh /tmp/install-officecli.sh --binary-file "/staged/linux-${TARGETARCH}/officecli" --skill-file /staged/common/officecli-SKILL.md ;;' in source
-    assert "COPY docker/openclaw/validate-gogcli.sh /usr/local/bin/validate-gogcli.sh" in lines
-    assert "RUN chmod 0755 /usr/local/bin/validate-gogcli.sh" in lines
-    for name in ("officecli", "soul-guardian", "tavily", "humanizer"):
-        assert f"COPY docker/openclaw/validate-{name}.sh /usr/local/bin/validate-{name}.sh" in lines
+    for name in ("gogcli", "officecli", "soul-guardian", "tavily", "humanizer"):
+        assert f"COPY --chmod=0755 docker/openclaw/validate-{name}.sh /usr/local/bin/validate-{name}.sh" in lines
         assert f"!docker/openclaw/validate-{name}.sh" in (DOCKERFILE.parent / ".dockerignore").read_text().splitlines()
-    chmod = next(line for line in lines if line.startswith("RUN chmod 0755 /usr/local/bin/validate-officecli.sh"))
-    assert {f"/usr/local/bin/validate-{name}.sh" for name in ("officecli", "soul-guardian", "tavily", "humanizer")} <= set(shlex.split(chmod))
+    assert not [line for line in lines if line.startswith("RUN chmod")]
     assert "COPY docker/openclaw/tavily-skills/ /tmp/tavily-skills/" in lines
     assert "COPY docker/openclaw/install-tavily.sh /tmp/install-tavily.sh" in lines
-    assert "RUN sh /tmp/install-tavily.sh && rm /tmp/install-tavily.sh" in lines
+    assert "RUN sh /tmp/install-tavily.sh && rm /tmp/install-tavily.sh /tmp/install-common.sh" in lines
     assert '!docker/openclaw/install-tavily.sh' in (DOCKERFILE.parent / '.dockerignore').read_text().splitlines()
     assert '!docker/openclaw/tavily-skills/' in (DOCKERFILE.parent / '.dockerignore').read_text().splitlines()
     assert '!docker/openclaw/tavily-skills/**' in (DOCKERFILE.parent / '.dockerignore').read_text().splitlines()
@@ -100,14 +97,26 @@ def test_image_installs_pinned_cli_and_runs_validator_as_entrypoint() -> None:
     assert "bootstrap-officecli" not in source
 
 
+def test_shared_installer_helper_spans_the_installers_and_is_whitelisted() -> None:
+    lines = DOCKERFILE.read_text().splitlines()
+    helper_copy = lines.index("COPY docker/openclaw/install-common.sh /tmp/install-common.sh")
+    installers = ("officecli", "gogcli-skills", "soul-guardian", "humanizer", "tavily")
+    first = lines.index("COPY docker/openclaw/install-officecli.sh /tmp/install-officecli.sh")
+    last_run = lines.index("RUN sh /tmp/install-tavily.sh && rm /tmp/install-tavily.sh /tmp/install-common.sh")
+    assert helper_copy < first < last_run
+    assert sum("rm " in line and "/tmp/install-common.sh" in line for line in lines) == 1
+    assert "!docker/openclaw/install-common.sh" in (DOCKERFILE.parent / ".dockerignore").read_text().splitlines()
+    for name in installers:
+        installer = (DOCKERFILE.parent / f"docker/openclaw/install-{name}.sh").read_text()
+        assert '# shellcheck source=install-common.sh\n. "$(dirname -- "$0")/install-common.sh"\n' in installer
+
+
 def test_image_installs_and_includes_probe_helpers() -> None:
     lines = DOCKERFILE.read_text().splitlines()
     allowed = (DOCKERFILE.parent / ".dockerignore").read_text().splitlines()
     for helper in ("startup-probe.sh", "startup-probe.py", "bootstrap_event.py", "bootstrap-agent-container.py"):
-        assert f"COPY docker/openclaw/{helper} /usr/local/bin/{helper}" in lines
+        assert f"COPY --chmod=0755 docker/openclaw/{helper} /usr/local/bin/{helper}" in lines
         assert f"!docker/openclaw/{helper}" in allowed
-    chmod = next(line for line in lines if line.startswith("RUN chmod 0755 /usr/local/bin/validate-officecli.sh"))
-    assert {"/usr/local/bin/bootstrap_event.py", "/usr/local/bin/bootstrap-agent-container.py"} <= set(shlex.split(chmod))
 
 
 def test_officecli_flags_are_effective_for_install_and_gateway() -> None:
@@ -136,6 +145,12 @@ def test_image_inventory_is_created_after_installers_before_node() -> None:
     assert source.index("RUN sh /tmp/install-tavily.sh") < inventory < source.index("USER node")
     assert source.index("sh /tmp/install-humanizer.sh") < inventory
     assert "!docker/openclaw/install-humanizer.sh" in allowed
+    assert "!docker/openclaw/check-skills.py" in allowed
+    check = (
+        "COPY docker/openclaw/check-skills.py /tmp/check-skills.py\n"
+        'RUN python3 /tmp/check-skills.py --skills-root "$HOME/.openclaw/skills" && rm /tmp/check-skills.py\n'
+    )
+    assert source.index("RUN sh /tmp/install-tavily.sh") < source.index(check) < inventory
     assert '--skills-root "$HOME/.openclaw/skills"' in source[inventory:]
     assert "--gog-roots-file /usr/local/share/openclaw-integrity/gog-skill-roots.txt" in source[inventory:]
     assert "--output-dir /usr/local/share/openclaw-integrity" in source[inventory:]
