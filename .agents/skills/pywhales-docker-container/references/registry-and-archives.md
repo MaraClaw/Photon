@@ -33,6 +33,16 @@ with docker.pull([], stream_logs=True) as progress:
 progress.close()  # safe after context exit too
 ```
 
+Inside `observation()`, multiple-reference pull and push size their fanout to
+the tightest remaining enclosing `max_concurrent_children` allowance, capped at
+four; one remaining slot serializes transfers. Unobserved or child-unbounded
+scopes still use four workers. Blocking calls size in the caller's context.
+Lazy multi-image streams read the allowance at first consumption in their
+snapshotted creation context, even after that scope exits. Sizing reserves no
+slots: a sibling can still consume capacity before launch and cause immediate
+`ObservationLimitError("concurrent_children")`. With zero slots the first launch
+is refused normally, without waiting or consuming a launch attempt.
+
 `push` batch-inspects every deduplicated reference before starting any
 transfer, including streamed ones, so a missing local image raises
 `NoSuchImage` before a registry connection is attempted.
@@ -154,6 +164,7 @@ policy = InspectionPolicy(
     max_argv_bytes=1_048_576,
     max_response_bytes=1_048_576,
     max_total_stdin_bytes=64 * 1024 * 1024,
+    max_total_io_bytes=80 * 1024 * 1024,
 )
 with open("alpine.tar", "rb") as archive, observation(policy):
     tags = docker.load(iter(lambda: archive.read(65_536), b""), timeout=60)
@@ -170,6 +181,21 @@ direct archive reads use `max_total_stream_bytes`, not the captured-response
 total. Path-based `load("alpine.tar")` lets the CLI read the file itself, so it
 doesn't charge an upload stdin budget.
 
+The example also sets `max_total_io_bytes`, an optional positive exact integer
+shared by upload writes, caller-thread archive stdout/stderr reads, and other
+captured/stream reads or managed stdin writes in the same observation. Every
+enclosing account is charged atomically, including across copied contexts, and
+launched transfers retain it after scope exit. It adds to the separate stdin,
+stream, and response caps. Exact-budget EOF succeeds; an output read may take one
+detection byte before `ObservationLimitError(reason="total_io")`, after which no
+further spending is allowed. Writes never send beyond either allowance, and
+source-specific limits win ties. Cleanup/watchdog drains and post-exit stderr
+used for Docker-error classification don't spend IO. Filename-based archive
+contents and direct/inherited stream stdin are excluded, while their managed
+progress output still counts. IO alone does not enable captured input: that
+still needs `max_total_stdin_bytes`. See
+[Sharing one IO budget](observation-and-convergence.md#sharing-one-io-budget).
+
 Use cooperative chunk producers: deadlines and cancellation can reap the local
 CLI but cannot interrupt arbitrary Python code inside the input iterator. For
 nested limits and observation exceptions, see
@@ -184,7 +210,7 @@ pull/push progress streams report under the regular `captured`/`stream`
 families instead. See
 [Telemetry and admission](telemetry-and-admission.md) for the full schema.
 
-Schema-8 observation preflight refusals use those same families, emit no
+Schema-10 observation preflight refusals use those same families, emit no
 launch/completion pair, and preserve the original exception without starting a
 child or reading upload input. A lazy save checks and can emit its refusal at
 first iteration, not construction; eager inspection is a separate captured
