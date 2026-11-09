@@ -34,6 +34,7 @@ ARG HUMANIZER_SHA256
 
 USER root
 RUN --mount=type=bind,source=docker/openclaw/openclaw-package,target=/tmp/openclaw-package \
+    --mount=type=bind,source=docker/openclaw/patch-cron-maintenance.py,target=/tmp/patch-cron-maintenance.py \
     sed -i \
         -e "s#http://deb.debian.org/debian-security#https://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}#" \
         -e "s#http://deb.debian.org/debian#https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}#" \
@@ -61,6 +62,7 @@ RUN --mount=type=bind,source=docker/openclaw/openclaw-package,target=/tmp/opencl
     && printf '%s  %s\n' "$LOCKED_SHA512" "$OPENCLAW_TARBALL" > /tmp/openclaw.lock.sha512 \
     && sha512sum -c /tmp/openclaw.lock.sha512 \
     && npm ci --prefix /opt/openclaw --install-strategy=shallow --omit=dev --no-audit --no-fund \
+    && python3 /tmp/patch-cron-maintenance.py /opt/openclaw/node_modules/openclaw \
     && ln -s /opt/openclaw/node_modules/.bin/openclaw /usr/local/bin/openclaw \
     && rm -f "$OPENCLAW_TARBALL" /tmp/openclaw.tgz.sha256 /tmp/openclaw.lock.sha512 \
     && rm -rf /root/.npm
