@@ -130,6 +130,21 @@ def main() -> None:
                 ),
                 end="",
             )
+            print(f"Running cron context QA for {platform}: {container}", flush=True)
+            print(
+                docker.run(
+                    image,
+                    ["/tmp/openclaw-cron-context-qa.mjs"],
+                    entrypoint="node",
+                    name=container,
+                    remove=True,
+                    networks=["none"],
+                    platform=platform,
+                    volumes=[(root / "tests/openclaw_cron_context_qa.mjs", "/tmp/openclaw-cron-context-qa.mjs", "ro")],
+                    timeout=120,
+                ),
+                end="",
+            )
         finally:
             original_error = sys.exception()
             cleanup_errors: list[Exception] = []

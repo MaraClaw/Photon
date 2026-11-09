@@ -43,6 +43,7 @@ Runtime skill selection policy belongs in the `*-soul.md` fragments. The Dockerf
 - Tavily skills are installed from `tavily-skills/` at build time; startup validates them offline without credentials.
 - Humanizer is installed at build time with installer-owned archive pins; startup validates it offline.
 - OpenClaw lives in `/opt/openclaw/node_modules/openclaw` (not the global npm root), installed by `npm ci` from `openclaw-package/package-lock.json` after its archive is checked against `OPENCLAW_SHA256` and the lock integrity, without local memory-provider patches. Only OpenClaw's own install scripts run, approved through `allowScripts` in that `package.json`.
+- After `npm ci`, `patch-cron-maintenance.py` requires OpenClaw 2026.11.2 and the exact SHA256 preimage of `dist/maintenance-ClKvIKaH.mjs`, then binds only maintenance `scope.schedule` to its lifecycle async context before event subscribers can schedule from a temporary prep scope. Drift or repeat application fails the build before writing. Remove the helper, build invocation, and context whitelist when upstream fixes this lifecycle context bug.
 - Apt resolves from `snapshot.debian.org` at the `DEBIAN_SNAPSHOT` ARG; a pin bump may need a newer snapshot.
 - Releases come from `.github/workflows/release.yml` on `openclaw-v<version>` tags and are cosign-signed keyless by digest.
 
