@@ -9,8 +9,8 @@ SHELL ["/bin/sh", "-c"]
 ARG TARGETOS
 ARG TARGETARCH
 ARG OPENCLAW_ASSET_MODE=online
-ARG OPENCLAW_VERSION=2026.11.1
-ARG OPENCLAW_SHA256=sha256:611282534d576e12f10b0ac5a1ac0d2825aac360637e92815a56eb71fb5a0301
+ARG OPENCLAW_VERSION=2026.11.2
+ARG OPENCLAW_SHA256=sha256:7881887b88d81e5fdff361b7aac59b6a736308e1815a175b9ccd9cdca1bb5e48
 ARG DEBIAN_SNAPSHOT=20261027T000000Z
 ARG TINI_VERSION=0.19.0-3+b8
 ARG CA_CERTIFICATES_VERSION=20250419+deb13u1
@@ -48,7 +48,7 @@ RUN --mount=type=bind,source=docker/openclaw/openclaw-package,target=/tmp/opencl
     "libicu76=${LIBICU76_VERSION}" \
     "tini=${TINI_VERSION}" \
     && rm -rf /var/lib/apt/lists/* \
-    && npm install -g npm@12.2.1 \
+    && npm install -g npm@12.2.2 \
     && install -D -m 0644 -t /opt/openclaw /tmp/openclaw-package/package.json /tmp/openclaw-package/package-lock.json \
     && LOCKED_VERSION=$(node -p 'require("/opt/openclaw/package-lock.json").packages["node_modules/openclaw"].version') \
     && if [ "$LOCKED_VERSION" != "$OPENCLAW_VERSION" ]; then printf 'OPENCLAW_VERSION=%s does not match the openclaw version %s locked in docker/openclaw/openclaw-package/package-lock.json\n' "$OPENCLAW_VERSION" "$LOCKED_VERSION" >&2; exit 1; fi \
