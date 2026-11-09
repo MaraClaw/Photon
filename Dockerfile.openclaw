@@ -67,6 +67,8 @@ RUN --mount=type=bind,source=docker/openclaw/openclaw-package,target=/tmp/opencl
     && rm -f "$OPENCLAW_TARBALL" /tmp/openclaw.tgz.sha256 /tmp/openclaw.lock.sha512 \
     && rm -rf /root/.npm
 
+RUN uv pip install --system --no-cache --upgrade uv
+
 RUN groupmod -n node pn \
     && usermod -l node -d /home/node -m pn
 
