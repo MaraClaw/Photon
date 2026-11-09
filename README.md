@@ -29,7 +29,7 @@ Copy `.env.example` to `.env` if you want project-local configuration. Both scri
 The local build loads one target (default `linux/arm64`) and defaults to `openclaw:local`. Its tag must match the engine's `MARACLAW_OPENCLAW_IMAGE` and it must be loaded on the same Docker daemon used by the worker. For example, with no overriding assignment in the selected env file:
 
 ```bash
-MARACLAW_OPENCLAW_IMAGE=openclaw:2026.11.1 ./build-openclaw-local-dockerfile.sh
+MARACLAW_OPENCLAW_IMAGE=openclaw:2026.11.2 ./build-openclaw-local-dockerfile.sh
 ```
 
 Set `DOCKER_PLATFORM=linux/amd64` for the other supported target. If you override a pin, override its paired version and checksum together.
@@ -39,7 +39,7 @@ OpenClaw is installed with `npm ci` from the committed `docker/openclaw/openclaw
 ```bash
 docker run --rm --platform linux/arm64 -v "$PWD/docker/openclaw/openclaw-package":/work -w /work --entrypoint sh \
   nikolaik/python-nodejs:python3.15-nodejs26-slim@sha256:552fd665f95f93fbbba5d145807667ddbf3b62fd45d555541b62eed7310cfe19 \
-  -c 'npm install -g npm@12.2.1 && npm install --package-lock-only --install-strategy=shallow --ignore-scripts --allow-remote=all --no-audit --no-fund'
+  -c 'npm install -g npm@12.2.2 && npm install --package-lock-only --install-strategy=shallow --ignore-scripts --allow-remote=all --no-audit --no-fund'
 ```
 
 Debian packages are resolved from `snapshot.debian.org` at `DEBIAN_SNAPSHOT`, so the apt pins stay installable after security updates supersede them; the image keeps those snapshot sources. When bumping a package pin, move the snapshot to a timestamp where every pinned version exists for amd64 and arm64.
@@ -75,7 +75,7 @@ Alternatively set `OPENCLAW_PUBLISH_IMAGE`; `IMAGE_TAG` defaults to `OPENCLAW_VE
 
 ### Release
 
-Pushing a tag `openclaw-v<version>` (for example `openclaw-v2026.11.1`) runs the Photon Release workflow; `workflow_dispatch` from a tag ref works too. `<version>` must equal the Dockerfile's `ARG OPENCLAW_VERSION`, or the workflow fails before building. It needs the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` and the repository variable `DOCKERHUB_NAMESPACE`. It publishes `<namespace>/openclaw:<version>` and `:latest` for both architectures, then signs the manifest-list digest with cosign keyless (Sigstore, GitHub OIDC). Verify a release with:
+Pushing a tag `openclaw-v<version>` (for example `openclaw-v2026.11.2`) runs the Photon Release workflow; `workflow_dispatch` from a tag ref works too. `<version>` must equal the Dockerfile's `ARG OPENCLAW_VERSION`, or the workflow fails before building. It needs the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` and the repository variable `DOCKERHUB_NAMESPACE`. It publishes `<namespace>/openclaw:<version>` and `:latest` for both architectures, then signs the manifest-list digest with cosign keyless (Sigstore, GitHub OIDC). Verify a release with:
 
 ```bash
 cosign verify \

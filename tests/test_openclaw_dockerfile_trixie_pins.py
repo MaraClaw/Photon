@@ -31,7 +31,7 @@ RUN apt-get update \\
     && rm -rf /var/lib/apt/lists/*
 """
 VALID_SNAPSHOT_BLOCK: Final = """\
-ARG DEBIAN_SNAPSHOT=20261027T000000Z
+ARG DEBIAN_SNAPSHOT=20261108T214731Z
 RUN sed -i \\
         -e "s#http://deb.debian.org/debian-security#https://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}#" \\
         -e "s#http://deb.debian.org/debian#https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}#" \\
@@ -142,7 +142,7 @@ def test_openclaw_dockerfile_resolves_apt_from_the_pinned_debian_snapshot() -> N
 def test_snapshot_contract_rejects_floating_or_unrewritten_apt_sources() -> None:
     # Given
     regression_cases = (
-        ("ARG DEBIAN_SNAPSHOT=20261027T000000Z", "ARG DEBIAN_SNAPSHOT=latest", "YYYYMMDDTHHMMSSZ"),
+        ("ARG DEBIAN_SNAPSHOT=20261108T214731Z", "ARG DEBIAN_SNAPSHOT=latest", "YYYYMMDDTHHMMSSZ"),
         ("debian-security/${DEBIAN_SNAPSHOT}", "debian-security", "debian-security snapshot URI"),
         ("Check-Valid-Until: no", "Check-Valid-Until: yes", "Check-Valid-Until"),
         ("apt-get -o Acquire::Retries=3 install", "apt-get install", "both retry"),
@@ -187,8 +187,8 @@ def test_dockerfile_target_selection_uses_buildkit_arguments_not_host_architectu
     # Then
     if target in {"linux/amd64", "linux/arm64"}:
         expected = {
-            "amd64": "sha256:279bc3a03c1919d774e268ef229949f45b753a0e21257f9fb315b05be7a40ea9",
-            "arm64": "sha256:c677ac6abf5e187e987a87fe1b588f454b002a7d7019de81b9e8db02e9e902b6",
+            "amd64": "sha256:8809d2f4fe95a0299b1a2a5c6bc912c4aba4b90a7b5e2c1f5cf11b9945a50004",
+            "arm64": "sha256:fc40524368d2cb6213bdfe0b736b5884e1b55c6368706d7a285542cb7e559b68",
         }
         assert result.returncode == 0, result.stderr
         assert result.stdout == expected[architecture]

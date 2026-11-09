@@ -144,6 +144,38 @@ accept a per-call `timeout`. Container, image, network, volume and system prune
 also accept it; see [Bound prune CLI launches](containers-and-output.md#bound-prune-cli-launches)
 for result shapes, filters and destructive-timeout handling.
 
+## Hydrated Listings And Snapshot Lifetimes
+
+For tables that read many resource properties, use the keyword-only
+`hydrate=True` on `client.container.list`, `client.image.list`,
+`client.network.list`, or `client.volume.list`. `client.ps(hydrate=True)` is the
+container alias. Default listings remain lazy and keep their existing ordering;
+hydrated image listings deduplicate in first-seen CLI order. All return lists.
+
+```python
+from pywhales import DockerClient
+
+client = DockerClient()
+containers = client.container.list(all=True, hydrate=True)
+rows = [(container.id, container.name) for container in containers]
+```
+
+Run the listing only against the authorized target. A healthy listing launches
+one list command and one inspect per chunk of at most 100 resources. Results
+match exact full IDs (exact names for volumes), and vanished resources are
+omitted by re-probing only affected chunks. Other inspection failures propagate.
+Each chunk is its own snapshot, not an atomic snapshot of the whole daemon.
+
+Hydrated properties keep their pinned snapshots until a successful explicit
+`reload()` or a mutation through that handle releases the pin. A failed mutation
+launch also releases it. Mutating by a plain name or through another handle
+doesn't invalidate this instance; call `reload()` when fresh state is needed.
+Container context cleanup refreshes formerly pinned state before stopping or
+removing, so use context management only for resources the application owns.
+Ordinary inspect and bulk reload don't pin. Unpinned cache expiry uses monotonic
+time; copying or unpickling a handle resets freshness and pins. Don't sleep to
+try to expire a hydrated snapshot.
+
 ## Handle the Right Failure
 
 ```python
@@ -254,6 +286,13 @@ limits around specific calls, see
 [Telemetry and admission](telemetry-and-admission.md). For bounding batch
 inspection or waiting for Swarm node readiness, service/job/stack, Compose project, or standalone container convergence,
 see [Observation budgets and convergence](observation-and-convergence.md).
+
+For one shared allowance over managed pipe reads and stdin writes, set
+`InspectionPolicy.max_total_io_bytes` inside `observation()`, not on the client.
+This adds to separate response/stream/stdin limits and doesn't bound file contents
+transferred by CLI filename arguments. For closed stop attribution and exporter
+offer counts, inspect schema-10 telemetry support as described in
+[Usage validation](validation.md).
 
 Application policy APIs also require explicit imports from `pywhales.profiles`,
 `pywhales.reconciliation`, or `pywhales.storage`, not the package root. They

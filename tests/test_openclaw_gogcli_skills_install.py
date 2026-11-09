@@ -10,8 +10,8 @@ import pytest
 
 ROOT: Final = Path(__file__).resolve().parents[1]
 INSTALLER: Final = ROOT / "docker/openclaw/install-gogcli-skills.sh"
-COMMIT: Final = "b8298ae6fd5335ddebc4bc8594e3b09aa3020ab4"
-PIN: Final = "e1f4de9af4ef3f1607121ab68aef383dd2803a9450977abbab01cf1112df6d25"
+COMMIT: Final = "f939ed37151af5b789ac08b98339fe8ddf880b09"
+PIN: Final = "aecef254b43b0ffa0a60aee32068fa15707216f8a3c661a1cbdd20ca9cbdc94c"
 OTHER_COMMIT: Final = "0123456789abcdef0123456789abcdef01234567"
 COMMIT_KEY: Final = "GOGCLI_SKILLS_COMMIT"
 SHA_KEY: Final = "GOGCLI_SKILLS_SHA256"
