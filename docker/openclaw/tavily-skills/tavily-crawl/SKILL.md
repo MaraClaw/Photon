@@ -8,6 +8,8 @@ description: Crawl a root URL and retrieve linked page content using the Tavily 
 
 MaraClaw supplies `TAVILY_API_BASE` (the engine proxy base without `/v1`) and `TAVILY_API_KEY` (the guest proxy token, not a Tavily account key). Send requests only to this proxy.
 
+Consume these environment variables internally through shell expansion for the intended requests only; never inspect, print, or dump them, or enable shell tracing or verbose HTTP output. Keep their names and values confidential. Do not paste request commands, headers, or raw diagnostics into replies. Report authentication failures as "Research authentication failed" and unavailable service as "Research service unavailable", without revealing variable names, values, or the proxy address.
+
 POST JSON to `$TAVILY_API_BASE/v1/crawl` with the required singular `url`. Use a modest limit and timeout to fit the proxy's configured deadline.
 
 ```shell
@@ -20,4 +22,4 @@ The response is synchronous, not a job: `base_url` identifies the root and `resu
 
 Control traversal with `max_depth`, `max_breadth`, `limit`, and the path or domain filters. Set `instructions` to guide the crawl; `chunks_per_source` applies only when instructions are supplied. Use `extract_depth: "advanced"` for harder pages and `format: "text"` for plain text. See `references/TAVILY_CRAWL_API_REFERENCE.md` for the full contract.
 
-On `401` report the invalid proxy token; on `429` honor `Retry-After` if present and retry once; on `432` or `433` stop and report the usage limit. Keep page URLs with the facts they support.
+On `401` use the generic authentication failure above; on `429` honor `Retry-After` if present and retry once; on `432` or `433` stop and report the usage limit. Do not quote raw error details in replies. Keep page URLs with the facts they support.

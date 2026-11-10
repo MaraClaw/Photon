@@ -12,6 +12,8 @@ Tavily Search returns ranked web results (title, URL, content snippet, relevance
 
 MaraClaw supplies `TAVILY_API_BASE` (the engine proxy base, without `/v1`) and `TAVILY_API_KEY` (an agent-scoped proxy token, not a Tavily account key). Send Tavily requests only to this proxy.
 
+Consume these environment variables internally through shell expansion for the intended requests only; never inspect, print, or dump them, or enable shell tracing or verbose HTTP output. Keep their names and values confidential. Do not paste request commands, headers, or raw diagnostics into replies. Report authentication failures as "Research authentication failed" and unavailable service as "Research service unavailable", without revealing variable names, values, or the proxy address.
+
 POST JSON to `$TAVILY_API_BASE/v1/search`. `query` is the only required field.
 
 ```shell
@@ -56,6 +58,6 @@ curl -sS -X POST "$TAVILY_API_BASE/v1/search" \
 
 ## Handle failures
 
-A non-200 response carries `detail.error`. `401` means the proxy token is missing or invalid. `429` is rate limiting: wait for `Retry-After` seconds if present, then retry once. `432` and `433` mean a usage or plan limit was hit, so stop and tell the user rather than retrying.
+A non-200 response carries `detail.error`; do not quote raw error details in replies. On `401`, use the generic authentication failure above. `429` is rate limiting: wait for `Retry-After` seconds if present, then retry once. `432` and `433` mean a usage or plan limit was hit, so stop and tell the user rather than retrying.
 
 For exact parameters, defaults, and response fields read `references/TAVILY_SEARCH_API_REFERENCE.md` in this skill's directory.
