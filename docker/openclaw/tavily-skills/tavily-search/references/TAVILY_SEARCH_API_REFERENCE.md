@@ -5,7 +5,7 @@
 ```shell
 curl -sS -X POST "$TAVILY_API_BASE/v1/search" \
   -H "Authorization: Bearer $TAVILY_API_KEY" -H "Content-Type: application/json" \
-  -d '{"query":"Who is the CEO of Stripe?","max_results":5}'
+  -d '{"query":"Who is the CEO of Stripe?","max_results":2}'
 ```
 
 - `TAVILY_API_BASE` is the proxy base without `/v1`; the path is appended as shown.
@@ -19,7 +19,7 @@ curl -sS -X POST "$TAVILY_API_BASE/v1/search" \
 | `query` | string | required | The search query. |
 | `search_depth` | `basic`, `advanced`, `fast`, `ultra-fast` | `basic` | `advanced` is highest relevance and costs 2 credits; the others cost 1. `ultra-fast` returns one summary per URL. |
 | `chunks_per_source` | 1-3 | 3 | Snippets per source; for `basic`, `fast`, `advanced`. |
-| `max_results` | 0-20 | 10 | Number of results. |
+| `max_results` | 0-20 | 10 | Number of results. This skill always sends `2` explicitly. |
 | `topic` | `general`, `news`, `finance` | `general` | `news` suits recent events and also returns `published_date`. |
 | `time_range` | `day`, `week`, `month`, `year` (or `d`, `w`, `m`, `y`) | none | Filters by publish or last-updated date. |
 | `start_date`, `end_date` | `YYYY-MM-DD` | none | Date window. |

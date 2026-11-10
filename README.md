@@ -10,6 +10,8 @@ The image also bundles `soul-guardian` from `prompt-security/clawsec`, including
 
 The image also installs the Humanizer skill and its upstream license at build time. Its installer owns the default archive commit and SHA256; `HUMANIZER_COMMIT` and `HUMANIZER_SHA256` optionally override those pins for local builds and publication. Startup validates the installed skill offline before bootstrap.
 
+The Humanizer communication policy requires user-facing prose, including proposed replies and drafts, to avoid em dashes (U+2014), even when matching a writing sample. Verbatim quotations and technical content that must remain unchanged retain their original punctuation. The final prose is checked again after humanizing.
+
 Runtime skill usage policy lives in `docker/openclaw/*-soul.md`. The image combines those fragments into `/usr/local/share/openclaw/skills-soul.md` and appends that content to OpenClaw's default `SOUL.md`. MaraClaw's workspace template references the image-owned file instead of copying its instructions. Changes apply to newly initialized workspaces; existing workspace files are preserved. Skill metadata remains responsible for discovery, and each `SKILL.md` and its references describe how to call that skill.
 
 ## Startup probe policy

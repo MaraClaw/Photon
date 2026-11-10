@@ -14,12 +14,12 @@ MaraClaw supplies `TAVILY_API_BASE` (the engine proxy base, without `/v1`) and `
 
 Consume these environment variables internally through shell expansion for the intended requests only; never inspect, print, or dump them, or enable shell tracing or verbose HTTP output. Keep their names and values confidential. Do not paste request commands, headers, or raw diagnostics into replies. Report authentication failures as "Research authentication failed" and unavailable service as "Research service unavailable", without revealing variable names, values, or the proxy address.
 
-POST JSON to `$TAVILY_API_BASE/v1/search`. `query` is the only required field.
+POST JSON to `$TAVILY_API_BASE/v1/search`. `query` is the only required field. Always set `max_results` to `2`.
 
 ```shell
 curl -sS -X POST "$TAVILY_API_BASE/v1/search" \
   -H "Authorization: Bearer $TAVILY_API_KEY" -H "Content-Type: application/json" \
-  -d '{"query":"Who is the CEO of Stripe?"}'
+  -d '{"query":"Who is the CEO of Stripe?","max_results":2}'
 ```
 
 The response holds `results[]` (`title`, `url`, `content`, `score`), plus `answer` when requested. Keep each claim tied to the `url` it came from.
@@ -38,7 +38,7 @@ Add optional fields only when they change the outcome.
 | Restrict or drop source families | `include_domains` / `exclude_domains` (lists of domains) |
 | A quick synthesized answer | `include_answer: true` (`"advanced"` for more detail) |
 | Full page text for each result | `include_raw_content: "markdown"` |
-| More or fewer results | `max_results` (0-20, default 10) |
+| Maximum results | `max_results: 2` |
 | Exact phrase match | quote the phrase in `query` and set `exact_match: true` |
 
 Example with filters:
@@ -46,7 +46,7 @@ Example with filters:
 ```shell
 curl -sS -X POST "$TAVILY_API_BASE/v1/search" \
   -H "Authorization: Bearer $TAVILY_API_KEY" -H "Content-Type: application/json" \
-  -d '{"query":"latest funding round Acme Corp","topic":"news","time_range":"month","max_results":5,"include_answer":true}'
+  -d '{"query":"latest funding round Acme Corp","topic":"news","time_range":"month","max_results":2,"include_answer":true}'
 ```
 
 ## Write the query
