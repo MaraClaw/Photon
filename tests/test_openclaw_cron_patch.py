@@ -8,13 +8,13 @@ import pytest
 
 ROOT: Final = Path(__file__).resolve().parents[1]
 PATCHER: Final = ROOT / "docker/openclaw/patch-cron-maintenance.py"
-MODULE: Final = Path("dist/maintenance-ClKvIKaH.mjs")
+MODULE: Final = Path("dist/maintenance-CT4-WlcF.mjs")
 CORRUPTED: Final = b"// corrupted package\n\tscope = scheduler.scope();\n"
 
 
 @pytest.fixture
 def package_root(tmp_path: Path) -> Path:
-    (tmp_path / "package.json").write_text(json.dumps({"version": "2026.11.2"}), encoding="utf-8")
+    (tmp_path / "package.json").write_text(json.dumps({"version": "2026.11.3"}), encoding="utf-8")
     (tmp_path / "dist").mkdir()
     (tmp_path / MODULE).write_bytes(CORRUPTED)
     return tmp_path
@@ -32,8 +32,8 @@ def run_patch(package_root: Path) -> subprocess.CompletedProcess[str]:
     ("{broken", "invalid package.json"),
     ("[]", "invalid package.json"),
     ("{}", "invalid package.json"),
-    ('{"version": "2026.11.3"}', "expected OpenClaw version 2026.11.2"),
-    ('{"version": null}', "expected OpenClaw version 2026.11.2"),
+    ('{"version": "2026.11.2"}', "expected OpenClaw version 2026.11.3"),
+    ('{"version": null}', "expected OpenClaw version 2026.11.3"),
 ])
 def test_invalid_package_metadata_is_rejected_before_writing(
     package_root: Path, manifest: str | None, diagnostic: str,

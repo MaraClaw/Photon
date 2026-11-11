@@ -12,9 +12,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-VERSION: Final = "2026.11.2"
-MODULE: Final = Path("dist/maintenance-ClKvIKaH.mjs")
-PREIMAGE_SHA256: Final = "2436235c6676045be4b339e6c51d5a53688ec80933bcccfc99d550550eaab6ee"
+VERSION: Final = "2026.11.3"
+MODULE: Final = Path("dist/maintenance-CT4-WlcF.mjs")
+PREIMAGE_SHA256: Final = "b3aa85b77099baa359fa5f03211775915056044b0a90d18cfb6c991b71fb195c"
 IMPORT: Final = b'import { AsyncLocalStorage } from "node:async_hooks";\n'
 ANCHOR: Final = b"\tscope = scheduler.scope();\n"
 BINDING: Final = b"\tscope.schedule = AsyncLocalStorage.bind(scope.schedule);\n"
