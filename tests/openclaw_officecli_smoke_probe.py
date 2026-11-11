@@ -35,7 +35,7 @@ printf 'executed node=%s arch=%s kernel=%s\n' "$(node --version)" "$(node -p 'pr
 gog --version | grep '0.48.0'
 gog --help > /tmp/gog-smoke-help.txt
 test -s /tmp/gog-smoke-help.txt
-openclaw --version | grep '2026.11.2'
+openclaw --version | grep '2026.11.3'
 """
 
 PROBE: Final = (
@@ -47,7 +47,7 @@ test "$OFFICECLI_NO_AUTO_RESIDENT" = 1
 test -f "$HOME/.openclaw/skills/officecli/SKILL.md"
 test -f "$HOME/.openclaw/skills/gog/SKILL.md"
 officecli_version="$(officecli --version)"
-printf '%s\n' "$officecli_version" | grep -Eq '(^|[^0-9])v?1\\.0\\.158([^0-9]|$)'
+printf '%s\n' "$officecli_version" | grep -Eq '(^|[^0-9])v?1\\.0\\.160([^0-9]|$)'
 printf 'executed %s\n' "$officecli_version"
 officecli --help > /tmp/officecli-help.txt
 test -s /tmp/officecli-help.txt

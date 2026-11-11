@@ -26,8 +26,9 @@ const fs = require("node:fs");
 const {spawnSync} = require("node:child_process");
 const candidates = fs.readdirSync("/proc").filter(name => /^\d+$/.test(name)).flatMap(pid => {
   try {
-    const command = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").replaceAll("\0", " ");
-    if (!/openclaw.*gateway/.test(command)) return [];
+    const title = fs.readFileSync(`/proc/${pid}/comm`, "utf8").trim();
+    // Linux comm truncates the gateway title to 15 bytes, including under Rosetta.
+    if (title !== "openclaw-gatewa") return [];
     const entries = fs.readFileSync(`/proc/${pid}/environ`, "utf8").split("\0");
     const env = Object.fromEntries(entries.filter(entry => entry.includes("=")).map(entry => {
       const index = entry.indexOf("=");

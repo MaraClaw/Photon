@@ -56,15 +56,27 @@ def test_real_dual_platform_offline_gateway_smoke(smoke_workspace: SmokeWorkspac
         if scenario == "restart":
             assert custom.joinpath(CHILD_MARKER).is_file()
             custom.joinpath(CHILD_MARKER).unlink()
-            docker.stop(workspace.container(architecture, "custom"))
         run_container(workspace, RunRequest(architecture, scenario, state, target))
         wait_for_gateway(name)
-        probe = probe_gateway(name, PROBE + (NATIVE_MEMORY_PROBE if scenario == "fresh" else ""))
+        probe = probe_gateway(name, PROBE)
         assert state.joinpath(CHILD_MARKER).is_file()
         if scenario == "fresh":
+            docker.stop(name)
+            with docker.create(
+                workspace.image(architecture), ["sh", "-euc", NATIVE_MEMORY_PROBE],
+                name=workspace.container(architecture, "memory"), platform=f"linux/{architecture}",
+                networks=["none"], volumes_from=[name],
+                tmpfs=["/home/node/.cache:uid=1000,gid=1000,mode=0700"],
+                envs={"HOME": "/home/node", "OPENCLAW_HOME": "/home/node", "OPENCLAW_STATE_DIR": target,
+                      "OPENCLAW_CONFIG_PATH": f"{target}/openclaw.json"},
+            ) as memory:
+                probe += docker.start(memory, attach=True, timeout=300)
             assert state.joinpath(MEMORY_MARKER).is_file()
+            docker.start(name)
+            wait_for_gateway(name)
         docker.execute(name, ["curl", "-fsS", "--max-time", "2", "http://127.0.0.1:18789/readyz"], timeout=1200)
         sys.stdout.write(f"linux/{architecture} {scenario} ready; no model inference performed\n{probe}\n")
+        docker.stop(name)
     server_arch = docker.info().architecture
     native = {"amd64": ("x86_64", "amd64"), "arm64": ("aarch64", "arm64")}
     execution = "native" if server_arch in native[architecture] else "emulated"
