@@ -6,7 +6,7 @@
 #
 # Usage:
 #   DOCKERHUB_NAMESPACE=youruser ./publish-openclaw-local-dockerfile.sh
-#   OPENCLAW_PUBLISH_IMAGE=youruser/openclaw IMAGE_TAG=2026.11.2 ./publish-openclaw-local-dockerfile.sh
+#   OPENCLAW_PUBLISH_IMAGE=youruser/openclaw IMAGE_TAG=2026.11.3 ./publish-openclaw-local-dockerfile.sh
 #   PUSH_LATEST=1 DOCKERHUB_NAMESPACE=youruser ./publish-openclaw-local-dockerfile.sh
 #
 # Environment (set in .env or on the command line):

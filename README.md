@@ -31,7 +31,7 @@ Copy `.env.example` to `.env` if you want project-local configuration. Both scri
 The local build loads one target (default `linux/arm64`) and defaults to `openclaw:local`. Its tag must match the engine's `MARACLAW_OPENCLAW_IMAGE` and it must be loaded on the same Docker daemon used by the worker. For example, with no overriding assignment in the selected env file:
 
 ```bash
-MARACLAW_OPENCLAW_IMAGE=openclaw:2026.11.2 ./build-openclaw-local-dockerfile.sh
+MARACLAW_OPENCLAW_IMAGE=openclaw:2026.11.3 ./build-openclaw-local-dockerfile.sh
 ```
 
 Set `DOCKER_PLATFORM=linux/amd64` for the other supported target. If you override a pin, override its paired version and checksum together.
@@ -77,7 +77,7 @@ Alternatively set `OPENCLAW_PUBLISH_IMAGE`; `IMAGE_TAG` defaults to `OPENCLAW_VE
 
 ### Release
 
-Pushing a tag `openclaw-v<version>` (for example `openclaw-v2026.11.2`) runs the Photon Release workflow; `workflow_dispatch` from a tag ref works too. `<version>` must equal the Dockerfile's `ARG OPENCLAW_VERSION`, or the workflow fails before building. It needs the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` and the repository variable `DOCKERHUB_NAMESPACE`. It publishes `<namespace>/openclaw:<version>` and `:latest` for both architectures, then signs the manifest-list digest with cosign keyless (Sigstore, GitHub OIDC). Verify a release with:
+Pushing a tag `openclaw-v<version>` (for example `openclaw-v2026.11.3`) runs the Photon Release workflow; `workflow_dispatch` from a tag ref works too. `<version>` must equal the Dockerfile's `ARG OPENCLAW_VERSION`, or the workflow fails before building. It needs the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` and the repository variable `DOCKERHUB_NAMESPACE`. It publishes `<namespace>/openclaw:<version>` and `:latest` for both architectures, then signs the manifest-list digest with cosign keyless (Sigstore, GitHub OIDC). Verify a release with:
 
 ```bash
 cosign verify \
