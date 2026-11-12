@@ -1,5 +1,5 @@
-ARG OPENCLAW_BASE_IMAGE_AMD64=nikolaik/python-nodejs:python3.15-nodejs26-slim@sha256:9b336a6647435ad6cb01107c1564e50eb867aebb14d0ca1dc04776f899b27e44
-ARG OPENCLAW_BASE_IMAGE_ARM64=nikolaik/python-nodejs:python3.15-nodejs26-slim@sha256:552fd665f95f93fbbba5d145807667ddbf3b62fd45d555541b62eed7310cfe19
+ARG OPENCLAW_BASE_IMAGE_AMD64=nikolaik/python-nodejs:python3.15-nodejs26-slim@sha256:fda77c7ee76b2607226f8d9c6915bb2e06197866f547ef708f9bcf5a07ba54b9
+ARG OPENCLAW_BASE_IMAGE_ARM64=nikolaik/python-nodejs:python3.15-nodejs26-slim@sha256:97081a38e971a9f06c2ae1fcf778d77c9e53f8c94fa1a9c9e300c1f3c9956f0a
 FROM scratch AS openclaw_assets
 FROM ${OPENCLAW_BASE_IMAGE_AMD64} AS base_amd64
 FROM ${OPENCLAW_BASE_IMAGE_ARM64} AS base_arm64

@@ -371,8 +371,8 @@ def test_openclaw_build_script_rejects_unsupported_or_multiple_platforms(tmp_pat
 @pytest.mark.parametrize(
     ("architecture", "digest"),
     [
-        ("amd64", "9b336a6647435ad6cb01107c1564e50eb867aebb14d0ca1dc04776f899b27e44"),
-        ("arm64", "552fd665f95f93fbbba5d145807667ddbf3b62fd45d555541b62eed7310cfe19"),
+        ("amd64", "fda77c7ee76b2607226f8d9c6915bb2e06197866f547ef708f9bcf5a07ba54b9"),
+        ("arm64", "97081a38e971a9f06c2ae1fcf778d77c9e53f8c94fa1a9c9e300c1f3c9956f0a"),
     ],
 )
 def test_dockerfile_selects_pinned_base_for_target_architecture(architecture: str, digest: str) -> None:
