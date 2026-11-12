@@ -7,9 +7,11 @@ import pytest
 
 from test_openclaw_build_script import (
     ARCHIVE_PIN_NAMES,
+    CACHE_FLAGS,
     OFFICECLI_PINS,
     PIN_NAMES,
     forwarded_archive_pins,
+    forwarded_cache,
     forwarded_pins,
     install_fake_docker,
     read_docker_argv,
@@ -25,7 +27,7 @@ def build_env(bin_dir: Path, log_path: Path, missing_env_file: Path) -> dict[str
     environment = os.environ.copy()
     for key in ("DOCKERHUB_NAMESPACE", "OPENCLAW_PUBLISH_IMAGE", "IMAGE_TAG", "PUSH_LATEST", "DOCKER_PLATFORM"):
         environment.pop(key, None)
-    for key in PIN_NAMES:
+    for key in (*PIN_NAMES, *CACHE_FLAGS):
         environment.pop(key, None)
     environment.update(
         ENV_FILE=str(missing_env_file),
@@ -122,6 +124,85 @@ def test_archive_pins_combine_process_and_file_sources_per_variable(tmp_path: Pa
         "GOGCLI_SKILLS_SHA256": "file-sha",
         "CLAWSEC_SHA256": "process-clawsec-sha",
     }
+
+
+@pytest.mark.parametrize("script", [PUBLISH_SCRIPT, REPO_ROOT / "build-openclaw-local-dockerfile.sh"])
+@pytest.mark.parametrize("name", CACHE_FLAGS)
+@pytest.mark.parametrize(
+    ("inherited", "from_file", "expected"),
+    [
+        (None, None, None),
+        ("", None, None),
+        ("type=local,src=/tmp/process cache; $HOME 'quoted'", None, "type=local,src=/tmp/process cache; $HOME 'quoted'"),
+        (None, "type=registry,ref=acme/openclaw:file cache,mode=max", "type=registry,ref=acme/openclaw:file cache,mode=max"),
+        ("type=gha,scope=process", "type=gha,scope=file", "type=gha,scope=file"),
+        ("type=gha,scope=process", "", None),
+        (None, "", None),
+    ],
+)
+def test_each_cache_setting_is_forwarded_verbatim_only_when_nonempty_after_file_precedence(
+    tmp_path: Path, script: Path, name: str, inherited: str | None, from_file: str | None, expected: str | None
+) -> None:
+    # Given
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    env_file = tmp_path / "cache.env"
+    environment = build_env(bin_dir, log_path, env_file) | {"DOCKERHUB_NAMESPACE": "acme", "IMAGE_TAG": "cache-test"}
+    if inherited is not None:
+        environment[name] = inherited
+    if from_file is not None:
+        write_env_file(env_file, {name: from_file})
+
+    # When
+    result = subprocess.run([str(script)], cwd=REPO_ROOT, env=environment, capture_output=True, text=True, check=False)  # noqa: S603
+
+    # Then only that setting's flag appears, with the value as one untouched argument.
+    assert result.returncode == 0, result.stderr
+    args = read_docker_argv(log_path)
+    assert forwarded_cache(args) == ({} if expected is None else {name: expected})
+    assert forwarded_pins(args) == {}
+
+
+@pytest.mark.parametrize("script", [PUBLISH_SCRIPT, REPO_ROOT / "build-openclaw-local-dockerfile.sh"])
+def test_cache_import_and_export_are_forwarded_together(tmp_path: Path, script: Path) -> None:
+    # Given
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    cache = {"OPENCLAW_BUILD_CACHE_FROM": "type=registry,ref=acme/openclaw:buildcache", "OPENCLAW_BUILD_CACHE_TO": "type=registry,ref=acme/openclaw:buildcache,mode=max"}
+    environment = build_env(bin_dir, log_path, tmp_path / "missing.env") | cache | {"DOCKERHUB_NAMESPACE": "acme"}
+
+    # When
+    result = subprocess.run([str(script)], cwd=REPO_ROOT, env=environment, capture_output=True, text=True, check=False)  # noqa: S603
+
+    # Then
+    assert result.returncode == 0, result.stderr
+    args = read_docker_argv(log_path)
+    assert forwarded_cache(args) == cache
+    assert ("--push" in args) == (script == PUBLISH_SCRIPT)
+    assert ("--load" in args) == (script != PUBLISH_SCRIPT)
+
+
+def test_publisher_passes_no_cache_flags_and_unchanged_arguments_by_default(tmp_path: Path) -> None:
+    # Given no cache setting, or only empty ones.
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    environment = build_env(bin_dir, log_path, tmp_path / "missing.env") | {"DOCKERHUB_NAMESPACE": "acme"}
+    expected = [
+        "buildx", "build", "--platform", "linux/amd64,linux/arm64", "-f", "Dockerfile.openclaw",
+        "-t", f"acme/openclaw:{OPENCLAW_VERSION}", "--provenance=mode=max", "--sbom=true", "--push", ".",
+    ]
+
+    for settings in ({}, dict.fromkeys(CACHE_FLAGS, "")):
+        # When
+        result = run_publish_script(environment | settings)
+
+        # Then the single two-platform attested push is exactly the one without cache support.
+        assert result.returncode == 0, result.stderr
+        assert read_docker_argv(log_path) == expected
+
+
+def test_release_workflow_publishes_without_a_build_cache() -> None:
+    workflow = (REPO_ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    assert "run: ./publish-openclaw-local-dockerfile.sh" in workflow
+    assert "OPENCLAW_BUILD_CACHE" not in workflow
+    assert "cache-from" not in workflow and "cache-to" not in workflow
 
 
 @pytest.mark.parametrize(
@@ -248,10 +329,13 @@ def test_scripts_delegate_to_the_shared_common_file(tmp_path: Path, script: Path
     (copy.parent / "openclaw-buildx-common.sh").write_text(
         "openclaw_source_env_file() { :; }\n"
         "openclaw_collect_pin_args() { PIN_ARGS=(--build-arg SHARED_SENTINEL=pins); }\n"
-        "openclaw_collect_asset_args() { ASSET_ARGS=(--build-arg SHARED_SENTINEL_ASSETS=\"$*\"); }\n",
+        "openclaw_collect_asset_args() { ASSET_ARGS=(--build-arg SHARED_SENTINEL_ASSETS=\"$*\"); }\n"
+        "openclaw_collect_cache_args() { CACHE_ARGS=(--cache-from SHARED_SENTINEL_CACHE); }\n",
         encoding="utf-8",
     )
-    environment = build_env(bin_dir, log_path, tmp_path / "missing.env") | {"DOCKERHUB_NAMESPACE": "acme"}
+    environment = build_env(bin_dir, log_path, tmp_path / "missing.env") | {
+        "DOCKERHUB_NAMESPACE": "acme", "OPENCLAW_BUILD_CACHE_FROM": "inline-import", "OPENCLAW_BUILD_CACHE_TO": "inline-export",
+    }
 
     # When
     result = subprocess.run([str(copy)], cwd=copy.parent, env=environment, capture_output=True, text=True, check=False)  # noqa: S603
@@ -263,6 +347,9 @@ def test_scripts_delegate_to_the_shared_common_file(tmp_path: Path, script: Path
     assert any(argument.startswith("SHARED_SENTINEL_ASSETS=") and "common/humanizer.tar.gz" in argument for argument in args)
     prefix = "openclaw-publish" if script == PUBLISH_SCRIPT else "openclaw-build"
     assert any(argument.startswith(f"SHARED_SENTINEL_ASSETS={prefix} ") for argument in args)
+    # Cache flags come only from the shared collector: the scripts assemble none themselves.
+    assert forwarded_cache(args) == {"OPENCLAW_BUILD_CACHE_FROM": "SHARED_SENTINEL_CACHE"}
+    assert "inline-import" not in args and "inline-export" not in args
 
 
 @pytest.mark.parametrize("script", [PUBLISH_SCRIPT, REPO_ROOT / "build-openclaw-local-dockerfile.sh"])

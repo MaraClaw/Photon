@@ -19,6 +19,10 @@
 #   GOGCLI_SKILLS_{COMMIT,SHA256}, CLAWSEC_{COMMIT,SHA256}, HUMANIZER_{COMMIT,SHA256}
 #                           optional pins, forwarded only when set and nonempty;
 #                           defaults come from the ARG lines in Dockerfile.openclaw
+#   OPENCLAW_BUILD_CACHE_FROM  optional BuildKit cache to import, passed to --cache-from
+#   OPENCLAW_BUILD_CACHE_TO    optional BuildKit cache to export, passed to --cache-to
+#                           (for example type=registry,ref=youruser/openclaw:buildcache,mode=max);
+#                           each flag is passed only when its setting is nonempty
 #
 # The pushed manifest carries max-mode provenance and an SBOM attestation.
 #
@@ -76,6 +80,8 @@ openclaw_collect_asset_args openclaw-publish \
     linux-amd64/gogcli.tar.gz linux-amd64/officecli linux-arm64/gogcli.tar.gz linux-arm64/officecli \
     common/officecli-SKILL.md common/gogcli-skills.tar.gz common/soul-guardian.tar.gz common/humanizer.tar.gz
 
+openclaw_collect_cache_args
+
 VERSIONED_REF="${PUBLISH_IMAGE}:${IMAGE_TAG}"
 echo "[openclaw-publish] Building linux/amd64,linux/arm64 and pushing $VERSIONED_REF"
 TAGS=(-t "$VERSIONED_REF")
@@ -90,6 +96,7 @@ docker buildx build \
     -f Dockerfile.openclaw \
     ${PIN_ARGS[@]+"${PIN_ARGS[@]}"} \
     ${ASSET_ARGS[@]+"${ASSET_ARGS[@]}"} \
+    ${CACHE_ARGS[@]+"${CACHE_ARGS[@]}"} \
     "${TAGS[@]}" \
     --provenance=mode=max \
     --sbom=true \
