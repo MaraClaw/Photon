@@ -6,11 +6,10 @@ FROM ${OPENCLAW_BASE_IMAGE_ARM64} AS base_arm64
 FROM base_${TARGETARCH}
 SHELL ["/bin/sh", "-c"]
 
-ARG TARGETOS
-ARG TARGETARCH
-ARG OPENCLAW_ASSET_MODE=online
-ARG OPENCLAW_VERSION=2026.11.3
-ARG OPENCLAW_SHA256=sha256:dae4c4f7549561db2fe5ac43af7ba0c9491f876380f070f7ffb87bf9721a10df
+# BuildKit adds every build argument that has a value to the environment of each later RUN,
+# whether or not the RUN reads it. Declare each ARG directly above the first RUN that reads
+# it, never at the top of the stage, so changing a pin rebuilds from that RUN onward.
+USER root
 ARG DEBIAN_SNAPSHOT=20261108T214731Z
 ARG TINI_VERSION=0.19.0-3+b8
 ARG CA_CERTIFICATES_VERSION=20250419+deb13u1
@@ -18,24 +17,7 @@ ARG CURL_VERSION=8.14.1-2+deb13u7
 ARG LIBCURL4_VERSION=8.14.1-2+deb13u7
 ARG BASH_VERSION=5.2.37-2+b10
 ARG LIBICU76_VERSION=76.1-4
-ARG GOGCLI_VERSION=0.48.0
-ARG GOGCLI_AMD64_SHA256=sha256:8809d2f4fe95a0299b1a2a5c6bc912c4aba4b90a7b5e2c1f5cf11b9945a50004
-ARG GOGCLI_ARM64_SHA256=sha256:fc40524368d2cb6213bdfe0b736b5884e1b55c6368706d7a285542cb7e559b68
-ARG OFFICECLI_VERSION=v1.0.160
-ARG OFFICECLI_ARM64_SHA256=e8f06aff6c59f11a73a1a1218bda3ce170299201fd56bce6d62ecd4d0c024e53
-ARG OFFICECLI_AMD64_SHA256=baa084b64ec634bd9d41a0592db3ed85f11658b358bab898679537ea7f3e73a9
-ARG OFFICECLI_SKILL_SHA256=c950d285ce60021712b4753fb2d9f592308d5622bab776229061dfecb1ce55d4
-ARG GOGCLI_SKILLS_COMMIT
-ARG GOGCLI_SKILLS_SHA256
-ARG CLAWSEC_COMMIT
-ARG CLAWSEC_SHA256
-ARG HUMANIZER_COMMIT
-ARG HUMANIZER_SHA256
-
-USER root
-RUN --mount=type=bind,source=docker/openclaw/openclaw-package,target=/tmp/openclaw-package \
-    --mount=type=bind,source=docker/openclaw/patch-cron-maintenance.py,target=/tmp/patch-cron-maintenance.py \
-    sed -i \
+RUN sed -i \
         -e "s#http://deb.debian.org/debian-security#https://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}#" \
         -e "s#http://deb.debian.org/debian#https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}#" \
         -e '/^URIs:/a Check-Valid-Until: no' \
@@ -48,8 +30,13 @@ RUN --mount=type=bind,source=docker/openclaw/openclaw-package,target=/tmp/opencl
     "libcurl4t64=${LIBCURL4_VERSION}" \
     "libicu76=${LIBICU76_VERSION}" \
     "tini=${TINI_VERSION}" \
-    && rm -rf /var/lib/apt/lists/* \
-    && npm install -g npm@12.2.2 \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG OPENCLAW_VERSION=2026.11.3
+ARG OPENCLAW_SHA256=sha256:dae4c4f7549561db2fe5ac43af7ba0c9491f876380f070f7ffb87bf9721a10df
+RUN --mount=type=bind,source=docker/openclaw/openclaw-package,target=/tmp/openclaw-package \
+    --mount=type=bind,source=docker/openclaw/patch-cron-maintenance.py,target=/tmp/patch-cron-maintenance.py \
+    npm install -g npm@12.2.2 \
     && install -D -m 0644 -t /opt/openclaw /tmp/openclaw-package/package.json /tmp/openclaw-package/package-lock.json \
     && LOCKED_VERSION=$(node -p 'require("/opt/openclaw/package-lock.json").packages["node_modules/openclaw"].version') \
     && if [ "$LOCKED_VERSION" != "$OPENCLAW_VERSION" ]; then printf 'OPENCLAW_VERSION=%s does not match the openclaw version %s locked in docker/openclaw/openclaw-package/package-lock.json\n' "$OPENCLAW_VERSION" "$LOCKED_VERSION" >&2; exit 1; fi \
@@ -75,6 +62,12 @@ RUN groupmod -n node pn \
 ENV HOME=/home/node
 RUN install -d -o node -g node -m 0755 "$HOME/.openclaw"
 
+ARG TARGETOS
+ARG TARGETARCH
+ARG OPENCLAW_ASSET_MODE=online
+ARG GOGCLI_VERSION=0.48.0
+ARG GOGCLI_AMD64_SHA256=sha256:8809d2f4fe95a0299b1a2a5c6bc912c4aba4b90a7b5e2c1f5cf11b9945a50004
+ARG GOGCLI_ARM64_SHA256=sha256:fc40524368d2cb6213bdfe0b736b5884e1b55c6368706d7a285542cb7e559b68
 RUN --mount=type=bind,from=openclaw_assets,target=/staged case "$TARGETOS/$TARGETARCH" in \
         linux/amd64) GOGCLI_SHA256="$GOGCLI_AMD64_SHA256" ;; \
         linux/arm64) GOGCLI_SHA256="$GOGCLI_ARM64_SHA256" ;; \
@@ -101,6 +94,10 @@ ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
 
 COPY docker/openclaw/install-common.sh /tmp/install-common.sh
 COPY docker/openclaw/install-officecli.sh /tmp/install-officecli.sh
+ARG OFFICECLI_VERSION=v1.0.160
+ARG OFFICECLI_ARM64_SHA256=e8f06aff6c59f11a73a1a1218bda3ce170299201fd56bce6d62ecd4d0c024e53
+ARG OFFICECLI_AMD64_SHA256=baa084b64ec634bd9d41a0592db3ed85f11658b358bab898679537ea7f3e73a9
+ARG OFFICECLI_SKILL_SHA256=c950d285ce60021712b4753fb2d9f592308d5622bab776229061dfecb1ce55d4
 RUN --mount=type=bind,from=openclaw_assets,target=/staged \
     case "$OPENCLAW_ASSET_MODE" in \
         online) sh /tmp/install-officecli.sh ;; \
@@ -108,6 +105,8 @@ RUN --mount=type=bind,from=openclaw_assets,target=/staged \
         *) exit 2 ;; \
     esac && rm /tmp/install-officecli.sh
 COPY docker/openclaw/install-gogcli-skills.sh /tmp/install-gogcli-skills.sh
+ARG GOGCLI_SKILLS_COMMIT
+ARG GOGCLI_SKILLS_SHA256
 RUN --mount=type=bind,from=openclaw_assets,target=/staged \
     install -d -m 0755 /usr/local/share/openclaw-integrity \
     && case "$OPENCLAW_ASSET_MODE" in \
@@ -116,6 +115,8 @@ RUN --mount=type=bind,from=openclaw_assets,target=/staged \
         *) exit 2 ;; \
     esac && rm /tmp/install-gogcli-skills.sh
 COPY docker/openclaw/install-soul-guardian.sh /tmp/install-soul-guardian.sh
+ARG CLAWSEC_COMMIT
+ARG CLAWSEC_SHA256
 RUN --mount=type=bind,from=openclaw_assets,target=/staged \
     case "$OPENCLAW_ASSET_MODE" in \
         online) sh /tmp/install-soul-guardian.sh ;; \
@@ -123,6 +124,8 @@ RUN --mount=type=bind,from=openclaw_assets,target=/staged \
         *) exit 2 ;; \
     esac && rm /tmp/install-soul-guardian.sh
 COPY docker/openclaw/install-humanizer.sh /tmp/install-humanizer.sh
+ARG HUMANIZER_COMMIT
+ARG HUMANIZER_SHA256
 RUN --mount=type=bind,from=openclaw_assets,target=/staged \
     case "$OPENCLAW_ASSET_MODE" in \
         online) sh /tmp/install-humanizer.sh ;; \

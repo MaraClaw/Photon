@@ -1,4 +1,5 @@
 import json
+import re
 import shlex
 from pathlib import Path
 
@@ -6,6 +7,64 @@ from test_openclaw_build_script import ARCHIVE_PIN_NAMES, OFFICECLI_PINS
 from test_openclaw_officecli_dockerfile import _instructions
 
 DOCKERFILE = Path(__file__).resolve().parents[1] / "Dockerfile.openclaw"
+ARCHIVE_PIN_OWNERS = {
+    "install-gogcli-skills": ("GOGCLI_SKILLS_COMMIT", "GOGCLI_SKILLS_SHA256"),
+    "install-soul-guardian": ("CLAWSEC_COMMIT", "CLAWSEC_SHA256"),
+    "install-humanizer": ("HUMANIZER_COMMIT", "HUMANIZER_SHA256"),
+}
+# The RUN that first reads each build argument, in Dockerfile order. A build argument with a
+# value enters the environment of every later RUN, so one declared any earlier than this
+# would invalidate layers that do not read it.
+ARGUMENT_READERS = (
+    ("apt-get -o Acquire::Retries=3 install", ("DEBIAN_SNAPSHOT", "TINI_VERSION", "CA_CERTIFICATES_VERSION", "CURL_VERSION", "LIBCURL4_VERSION", "BASH_VERSION", "LIBICU76_VERSION")),
+    ("npm ci --prefix /opt/openclaw", ("OPENCLAW_VERSION", "OPENCLAW_SHA256")),
+    ('tar -xzf "$GOGCLI_ARCHIVE"', ("TARGETOS", "TARGETARCH", "OPENCLAW_ASSET_MODE", "GOGCLI_VERSION", "GOGCLI_AMD64_SHA256", "GOGCLI_ARM64_SHA256")),
+    ("sh /tmp/install-officecli.sh", tuple(OFFICECLI_PINS)),
+    *((f"sh /tmp/{installer}.sh", names) for installer, names in ARCHIVE_PIN_OWNERS.items()),
+)
+
+
+def _final_stage() -> tuple[tuple[str, str], ...]:
+    instructions, errors = _instructions(DOCKERFILE.read_text())
+    assert not errors
+    start = max(index for index, (instruction, _body) in enumerate(instructions) if instruction == "FROM")
+    return instructions[start + 1:]
+
+
+def test_each_build_argument_is_declared_once_directly_above_its_first_reader() -> None:
+    stage = _final_stage()
+    for needle, names in ARGUMENT_READERS:
+        (reader,) = (index for index, (instruction, body) in enumerate(stage) if instruction == "RUN" and needle in body)
+        block: list[str] = []
+        cursor = reader - 1
+        while cursor >= 0 and stage[cursor][0] == "ARG":
+            block.append(stage[cursor][1].partition("=")[0])
+            cursor -= 1
+        assert sorted(block) == sorted(names), needle
+        for name in names:
+            earlier = [body for instruction, body in stage[:reader] if instruction == "RUN" and re.search(rf"\$\{{?{name}\b", body)]
+            assert not earlier, f"{name} is read before it is declared"
+    declared = [body.partition("=")[0] for instruction, body in stage if instruction == "ARG"]
+    assert sorted(declared) == sorted(name for _needle, names in ARGUMENT_READERS for name in names)
+
+
+def test_apt_and_openclaw_install_are_separate_layers_with_their_own_cleanup() -> None:
+    runs = [body for instruction, body in _final_stage() if instruction == "RUN"]
+    (apt,) = (body for body in runs if "apt-get" in body)
+    (openclaw,) = (body for body in runs if "npm" in body)
+    assert runs.index(apt) < runs.index(openclaw)
+    assert "snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}" in apt
+    assert apt.endswith("&& rm -rf /var/lib/apt/lists/*")
+    steps = (
+        "npm install -g npm@12.2.2",
+        "sha256sum -c /tmp/openclaw.tgz.sha256",
+        "sha512sum -c /tmp/openclaw.lock.sha512",
+        "npm ci --prefix /opt/openclaw --install-strategy=shallow --omit=dev --no-audit --no-fund",
+        "rm -rf /root/.npm",
+    )
+    positions = [openclaw.index(step) for step in steps]
+    assert positions == sorted(positions)
+    assert openclaw.endswith("&& rm -rf /root/.npm")
 
 
 def test_officecli_build_arguments_are_available_to_installer_but_not_runtime() -> None:
@@ -50,10 +109,12 @@ def test_archive_pin_arguments_are_final_stage_defaultless_and_not_runtime_env()
                     installer_args[installer] = stage_args.copy()
     assert stage_count == 4
     assert not global_args.intersection(ARCHIVE_PIN_NAMES)
-    assert set(installer_args) == {"install-gogcli-skills", "install-soul-guardian", "install-humanizer"}
-    for declared in installer_args.values():
-        for name in ARCHIVE_PIN_NAMES:
-            assert declared.count(name) == 1
+    assert set(installer_args) == set(ARCHIVE_PIN_OWNERS)
+    for installer, declared in installer_args.items():
+        for name in ARCHIVE_PIN_OWNERS[installer]:
+            assert declared.count(name) == 1, f"{name} must be declared, without a default, before {installer}"
+    for name in ARCHIVE_PIN_NAMES:
+        assert stage_args.count(name) == 1
     assert not runtime_env.intersection(ARCHIVE_PIN_NAMES)
 
 
