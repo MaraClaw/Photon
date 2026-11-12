@@ -17,13 +17,12 @@ probe_dir=${validator_path%/*}
 # shellcheck source=startup-probe.sh
 . "$probe_dir/startup-probe.sh"
 
-if ! probe_run python3 -B "$probe_dir/installed-assets.py" verify --component officecli --inventory-dir /usr/local/share/openclaw-integrity --skills-root "$HOME/.openclaw/skills"; then
-    printf '%s\n' 'Installed assets failed verification: officecli' >&2
-    exit 1
-fi
-
-if ! probe_run "/usr/local/bin/officecli" --version; then
-    printf 'Required CLI failed verification: %s\n' "/usr/local/bin/officecli" >&2
+if ! probe_verify officecli /usr/local/share/openclaw-integrity "$HOME/.openclaw/skills" "/usr/local/bin/officecli" --version; then
+    if [ "$probe_status" -eq 3 ]; then
+        printf 'Required CLI failed verification: %s\n' "/usr/local/bin/officecli" >&2
+    else
+        printf '%s\n' 'Installed assets failed verification: officecli' >&2
+    fi
     exit 1
 fi
 

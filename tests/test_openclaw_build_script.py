@@ -37,6 +37,7 @@ PIN_NAMES = (
     "HUMANIZER_SHA256",
 )
 ARCHIVE_PIN_NAMES = ("GOGCLI_SKILLS_COMMIT", "GOGCLI_SKILLS_SHA256", "CLAWSEC_COMMIT", "CLAWSEC_SHA256", "HUMANIZER_COMMIT", "HUMANIZER_SHA256")
+CACHE_FLAGS = {"OPENCLAW_BUILD_CACHE_FROM": "--cache-from", "OPENCLAW_BUILD_CACHE_TO": "--cache-to"}
 
 
 def read_docker_argv(log_path: Path) -> list[str]:
@@ -65,6 +66,18 @@ def forwarded_pins(argv: list[str]) -> dict[str, str]:
     }
     assert sum(argument.startswith(tuple(f"{name}=" for name in PIN_NAMES)) for argument in argv) == len(pins)
     return pins
+
+
+def forwarded_cache(argv: list[str]) -> dict[str, str]:
+    """Setting name -> forwarded value; each value must follow its flag as one separate argument."""
+    cache = {
+        name: value
+        for name, flag in CACHE_FLAGS.items()
+        for argument, value in zip(argv, argv[1:], strict=False)
+        if argument == flag
+    }
+    assert sorted(argument for argument in argv if argument.startswith("--cache")) == sorted(CACHE_FLAGS[name] for name in cache)
+    return cache
 
 
 def dockerfile_arg_defaults() -> dict[str, str]:
@@ -102,7 +115,7 @@ def build_env(bin_dir: Path, log_path: Path, missing_env_file: Path) -> dict[str
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
     env.pop("MARACLAW_OPENCLAW_IMAGE", None)
     env.pop("DOCKER_PLATFORM", None)
-    for name in PIN_NAMES:
+    for name in (*PIN_NAMES, *CACHE_FLAGS):
         env.pop(name, None)
     return env
 
@@ -249,6 +262,39 @@ def test_openclaw_build_script_loads_one_target_without_attestations(tmp_path: P
     assert "--sbom" not in command
 
 
+def test_openclaw_build_script_passes_no_cache_flags_and_unchanged_arguments_by_default(tmp_path: Path) -> None:
+    # Given no cache setting, or only empty ones.
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    env = build_env(bin_dir, log_path, tmp_path / "missing.env")
+    expected = ["buildx", "build", "--platform", "linux/arm64", "-f", "Dockerfile.openclaw", "-t", "arm64-openclaw:local", "--load", "."]
+
+    for settings in ({}, dict.fromkeys(CACHE_FLAGS, "")):
+        # When
+        result = run_build_script(env | settings)
+
+        # Then the buildx invocation is exactly the one without cache support.
+        assert result.returncode == 0, result.stderr
+        assert read_docker_argv(log_path) == expected
+
+
+def test_openclaw_build_script_forwards_configured_cache_and_still_loads(tmp_path: Path) -> None:
+    # Given
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    env = build_env(bin_dir, log_path, tmp_path / "missing.env")
+    env["OPENCLAW_BUILD_CACHE_FROM"] = "type=local,src=/tmp/build cache; $HOME 'quoted'"
+    env["OPENCLAW_BUILD_CACHE_TO"] = "type=local,dest=/tmp/build cache,mode=max"
+
+    # When
+    result = run_build_script(env)
+
+    # Then
+    assert result.returncode == 0, result.stderr
+    args = read_docker_argv(log_path)
+    assert forwarded_cache(args) == {name: env[name] for name in CACHE_FLAGS}
+    assert args[-4:] == ["-t", "arm64-openclaw:local", "--load", "."]
+    assert "--push" not in args
+
+
 def test_environment_example_lists_dockerfile_pin_defaults_as_commented_overrides() -> None:
     # Given
     pin_names = ("OPENCLAW_VERSION", "OPENCLAW_SHA256", "DEBIAN_SNAPSHOT", "GOGCLI_VERSION", "GOGCLI_AMD64_SHA256", "GOGCLI_ARM64_SHA256", *OFFICECLI_PINS)
@@ -325,8 +371,8 @@ def test_openclaw_build_script_rejects_unsupported_or_multiple_platforms(tmp_pat
 @pytest.mark.parametrize(
     ("architecture", "digest"),
     [
-        ("amd64", "9b336a6647435ad6cb01107c1564e50eb867aebb14d0ca1dc04776f899b27e44"),
-        ("arm64", "552fd665f95f93fbbba5d145807667ddbf3b62fd45d555541b62eed7310cfe19"),
+        ("amd64", "fda77c7ee76b2607226f8d9c6915bb2e06197866f547ef708f9bcf5a07ba54b9"),
+        ("arm64", "97081a38e971a9f06c2ae1fcf778d77c9e53f8c94fa1a9c9e300c1f3c9956f0a"),
     ],
 )
 def test_dockerfile_selects_pinned_base_for_target_architecture(architecture: str, digest: str) -> None:

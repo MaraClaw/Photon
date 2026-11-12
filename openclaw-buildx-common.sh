@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# shellcheck disable=SC2034  # PIN_ARGS and ASSET_ARGS are consumed by the sourcing scripts
+# shellcheck disable=SC2034  # PIN_ARGS, ASSET_ARGS and CACHE_ARGS are consumed by the sourcing scripts
 # Shared helpers for build-openclaw-local-dockerfile.sh and publish-openclaw-local-dockerfile.sh.
 # Source this file after changing to the script directory; it is not meant to be executed.
 #
@@ -67,4 +67,19 @@ openclaw_collect_asset_args() {
             ;;
         *) echo "[$log_prefix] invalid OPENCLAW_ASSET_MODE: $OPENCLAW_ASSET_MODE" >&2; exit 2 ;;
     esac
+}
+
+# openclaw_collect_cache_args
+# Fills CACHE_ARGS with --cache-from and --cache-to from OPENCLAW_BUILD_CACHE_FROM and
+# OPENCLAW_BUILD_CACHE_TO. Each value is one BuildKit cache spec, passed verbatim as a single
+# argument, only when set and nonempty: the default docker driver can reject cache export,
+# so no cache flag is ever implied.
+openclaw_collect_cache_args() {
+    CACHE_ARGS=()
+    if [ -n "${OPENCLAW_BUILD_CACHE_FROM:-}" ]; then
+        CACHE_ARGS+=(--cache-from "$OPENCLAW_BUILD_CACHE_FROM")
+    fi
+    if [ -n "${OPENCLAW_BUILD_CACHE_TO:-}" ]; then
+        CACHE_ARGS+=(--cache-to "$OPENCLAW_BUILD_CACHE_TO")
+    fi
 }

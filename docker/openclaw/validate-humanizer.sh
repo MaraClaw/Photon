@@ -17,7 +17,7 @@ probe_dir=${validator_path%/*}
 # shellcheck source=startup-probe.sh
 . "$probe_dir/startup-probe.sh"
 
-if ! probe_run python3 -B "$probe_dir/installed-assets.py" verify --component humanizer --inventory-dir /usr/local/share/openclaw-integrity --skills-root "$HOME/.openclaw/skills"; then
+if ! probe_verify humanizer /usr/local/share/openclaw-integrity "$HOME/.openclaw/skills"; then
     printf '%s\n' 'Required skill failed verification: humanizer' >&2
     exit 1
 fi

@@ -12,7 +12,7 @@ import pytest
 
 from openclaw_probe_test_support import (
     INVALID_POLICY, POLICY_KEYS, clean_policy, exercise_final_child,
-    exercise_invalid_policy, exercise_script_lookup, exercise_signal, exercise_timeout, install_hang, prepare_integrity, rebaseline,
+    exercise_invalid_policy, exercise_script_lookup, exercise_signal, exercise_timeout, install_inventory_hang, prepare_integrity, python_launches, rebaseline,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -162,7 +162,7 @@ def test_home_redirect_blocks_command(installation: tuple[Path, dict[str, str]],
 def test_tavily_hanging_probe_times_out(installation: tuple[Path, dict[str, str]]) -> None:
     skills, env = installation
     root = skills.parents[2]
-    install_hang(root, env, root / "bin/python3", python_probe="integrity")
+    install_inventory_hang(root, env)
     exercise_timeout(Path(env["VALIDATOR"]), env)
 
 
@@ -171,7 +171,7 @@ def test_tavily_hanging_probe_times_out(installation: tuple[Path, dict[str, str]
 def test_invalid_policy_prevents_tavily_probes(installation: tuple[Path, dict[str, str]], key: str, value: str) -> None:
     skills, env = installation
     root = skills.parents[2]
-    install_hang(root, env, root / "bin/python3", python_probe="integrity")
+    install_inventory_hang(root, env)
     exercise_invalid_policy(Path(env["VALIDATOR"]), env, key, value)
 
 
@@ -179,7 +179,7 @@ def test_invalid_policy_prevents_tavily_probes(installation: tuple[Path, dict[st
 def test_tavily_signal_cleans_parsing_group(installation: tuple[Path, dict[str, str]], signum: int) -> None:
     skills, env = installation
     root = skills.parents[2]
-    install_hang(root, env, root / "bin/python3", python_probe="integrity")
+    install_inventory_hang(root, env)
     exercise_signal(Path(env["VALIDATOR"]), env, signum)
 
 
@@ -188,7 +188,7 @@ def test_tavily_restart_rechecks_hanging_probe(installation: tuple[Path, dict[st
     root = skills.parents[2]
     assert subprocess.run(["/bin/sh", env["VALIDATOR"], "/bin/sh", "-c", ":"], env=env, timeout=5, check=False).returncode == 0
     (root / ".tavily-checked").touch()
-    install_hang(root, env, root / "bin/python3", python_probe="integrity")
+    install_inventory_hang(root, env)
     exercise_timeout(Path(env["VALIDATOR"]), env)
 
 
@@ -216,3 +216,8 @@ def test_untouched_tavily_restart_uses_same_inventory(installation: tuple[Path, 
     _, env = installation
     for _ in range(2):
         assert subprocess.run(["/bin/sh", env["VALIDATOR"], "/bin/sh", "-c", ":"], env=env, capture_output=True, text=True, check=False).returncode == 0
+
+
+def test_tavily_starts_one_interpreter(installation: tuple[Path, dict[str, str]]) -> None:
+    _, env = installation
+    assert python_launches(Path(env["VALIDATOR"]), env) == ["startup-probe.py"]

@@ -10,7 +10,7 @@ import pytest
 
 from openclaw_probe_test_support import (
     INVALID_POLICY, POLICY_KEYS, clean_policy, exercise_final_child,
-    exercise_invalid_policy, exercise_script_lookup, exercise_signal, exercise_timeout, install_hang, prepare_integrity, rebaseline,
+    exercise_invalid_policy, exercise_script_lookup, exercise_signal, exercise_timeout, install_hang, install_inventory_hang, prepare_integrity, python_launches, rebaseline,
 )
 
 VALIDATOR: Final = Path(__file__).resolve().parents[1] / "docker/openclaw/validate-soul-guardian.sh"
@@ -141,7 +141,10 @@ def test_probe_or_discovery_failure_blocks_child(guardian: tuple[Path, dict[str,
 def test_guardian_hanging_probe_times_out(guardian: tuple[Path, dict[str, str]], probe: str) -> None:
     skill, env = guardian
     root = Path(env["HOME"]).parent
-    install_hang(root, env, root / "bin/python3", python_probe=probe)
+    if probe == "integrity":
+        install_inventory_hang(root, env)
+    else:
+        install_hang(root, env, root / "bin/python3", python_probe=True)
     exercise_timeout(Path(env["VALIDATOR"]), env)
     assert not (Path(env["HOME"]) / "guardian-state").exists()
     assert not list(skill.rglob("__pycache__"))
@@ -152,7 +155,7 @@ def test_guardian_hanging_probe_times_out(guardian: tuple[Path, dict[str, str]],
 def test_invalid_policy_prevents_guardian_probes(guardian: tuple[Path, dict[str, str]], key: str, value: str) -> None:
     _, env = guardian
     root = Path(env["HOME"]).parent
-    install_hang(root, env, root / "bin/python3", python_probe="integrity")
+    install_inventory_hang(root, env)
     exercise_invalid_policy(Path(env["VALIDATOR"]), env, key, value)
 
 
@@ -160,7 +163,7 @@ def test_invalid_policy_prevents_guardian_probes(guardian: tuple[Path, dict[str,
 def test_guardian_signal_cleans_parsing_group(guardian: tuple[Path, dict[str, str]], signum: int) -> None:
     _, env = guardian
     root = Path(env["HOME"]).parent
-    install_hang(root, env, root / "bin/python3", python_probe="integrity")
+    install_inventory_hang(root, env)
     exercise_signal(Path(env["VALIDATOR"]), env, signum)
 
 
@@ -169,7 +172,7 @@ def test_guardian_restart_rechecks_hanging_probe(guardian: tuple[Path, dict[str,
     root = Path(env["HOME"]).parent
     assert subprocess.run(["/bin/sh", env["VALIDATOR"], "/bin/sh", "-c", ":"], env=env, timeout=5, check=False).returncode == 0
     (Path(env["HOME"]) / ".guardian-checked").touch()
-    install_hang(root, env, root / "bin/python3", python_probe="integrity")
+    install_inventory_hang(root, env)
     exercise_timeout(Path(env["VALIDATOR"]), env)
 
 
@@ -196,3 +199,8 @@ def test_untouched_guardian_restart_uses_same_inventory(guardian: tuple[Path, di
     _, env = guardian
     for _ in range(2):
         assert subprocess.run(["/bin/sh", env["VALIDATOR"], "/bin/sh", "-c", ":"], env=env, capture_output=True, text=True, check=False).returncode == 0
+
+
+def test_guardian_starts_only_the_supervisor_and_the_help_probe(guardian: tuple[Path, dict[str, str]]) -> None:
+    _, env = guardian
+    assert python_launches(Path(env["VALIDATOR"]), env) == ["startup-probe.py", "soul_guardian.py"]

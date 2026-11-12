@@ -11,6 +11,8 @@ Build and load one local OpenClaw image. Environment settings:
   ENV_FILE                     env file to source (default: .env)
   OPENCLAW_ASSET_MODE          online (default) or staged
   OPENCLAW_ASSET_DIR           asset directory required in staged mode
+  OPENCLAW_BUILD_CACHE_FROM    optional BuildKit cache to import, passed to --cache-from
+  OPENCLAW_BUILD_CACHE_TO      optional BuildKit cache to export, passed to --cache-to
   OPENCLAW_VERSION, OPENCLAW_SHA256, GOGCLI_VERSION, GOGCLI_{AMD64,ARM64}_SHA256,
   OFFICECLI_VERSION, OFFICECLI_{ARM64,AMD64,SKILL}_SHA256
                                optional pins; defaults come from Dockerfile.openclaw
@@ -25,6 +27,9 @@ The selected env file is sourced from the script directory if it exists;
 its assignments override inherited environment values. Empty values use defaults.
 Every pin is forwarded as a build argument only when set and nonempty; unset pins
 use the ARG defaults in Dockerfile.openclaw.
+Cache flags are passed only when their setting is nonempty, for example
+OPENCLAW_BUILD_CACHE_FROM=type=local,src=/path/to/cache; exporting a cache needs a
+builder whose driver supports it (the default docker driver may not).
 The target architecture is prepended literally to the image name:
   ./build-openclaw-local-dockerfile.sh  -> arm64-openclaw:local
   DOCKER_PLATFORM=linux/amd64 MARACLAW_OPENCLAW_IMAGE=workspace/openclaw:custom \
@@ -69,12 +74,15 @@ openclaw_collect_asset_args openclaw-build \
     "linux-${DOCKER_PLATFORM#linux/}/gogcli.tar.gz" "linux-${DOCKER_PLATFORM#linux/}/officecli" \
     common/officecli-SKILL.md common/gogcli-skills.tar.gz common/soul-guardian.tar.gz common/humanizer.tar.gz
 
+openclaw_collect_cache_args
+
 echo "[openclaw-build] Building $LOCAL_IMAGE for $DOCKER_PLATFORM with OpenClaw ${OPENCLAW_VERSION:-(Dockerfile.openclaw default)}"
 docker buildx build \
     --platform "$DOCKER_PLATFORM" \
     -f Dockerfile.openclaw \
     ${PIN_ARGS[@]+"${PIN_ARGS[@]}"} \
     ${ASSET_ARGS[@]+"${ASSET_ARGS[@]}"} \
+    ${CACHE_ARGS[@]+"${CACHE_ARGS[@]}"} \
     -t "$LOCAL_IMAGE" \
     --load \
     .

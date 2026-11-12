@@ -15,6 +15,7 @@ import threading
 
 VALIDATORS = ("gogcli", "officecli", "soul-guardian", "tavily", "humanizer")
 SOURCE = Path("/usr/local/bin")
+INVENTORY_STEP = "def verify(component: str, inventory_dir: Path, skills_root: Path | None) -> None:\n"
 
 
 def fake_probe() -> None:
@@ -22,8 +23,6 @@ def fake_probe() -> None:
     name = Path(sys.argv[0]).name
     mode = os.environ.get("PROBE_MODE", "") if name == os.environ.get("PROBE_TARGET") else ""
     if not mode:
-        if name == "probe-python":
-            os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
         return
     parent_pid = os.getpid()
     read_fd, write_fd = os.pipe()
@@ -50,18 +49,27 @@ def fake_probe() -> None:
 def prepare(directory: Path) -> tuple[dict[str, Path], dict[str, str]]:
     binary_dir = directory / "bin with spaces"
     binary_dir.mkdir()
-    for name in ("gog", "officecli", "probe-python"):
+    for name in ("gog", "officecli"):
         executable = binary_dir / name
         executable.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{__file__}" --fake "$0" "$@"\n')
         executable.chmod(0o755)
-    for helper in ("startup-probe.sh", "startup-probe.py", "installed-assets.py"):
+    for helper in ("startup-probe.sh", "startup-probe.py"):
         shutil.copy2(SOURCE / helper, directory / helper)
+    # The inventory step runs inside the supervisor, so its seam is the helper beside the
+    # validators: verify() leaves the marker and, when it is the target, becomes the fake probe.
+    inventory = (SOURCE / "installed-assets.py").read_text()
+    assert inventory.count(INVENTORY_STEP) == 1
+    (directory / "installed-assets.py").write_text(inventory.replace(
+        INVENTORY_STEP,
+        f'{INVENTORY_STEP}    Path(os.environ["PROBE_MARKER"]).touch()\n'
+        '    if os.environ.get("PROBE_TARGET") == "inventory" and os.environ.get("PROBE_MODE"):\n'
+        f'        os.execv({sys.executable!r}, [{sys.executable!r}, "-B", {__file__!r}, "--fake", "inventory"])\n',
+    ))
     scripts = {}
     for name in VALIDATORS:
         text = (SOURCE / f"validate-{name}.sh").read_text()
         for binary in ("gog", "officecli"):
             text = text.replace(f"/usr/local/bin/{binary}", str(binary_dir / binary))
-        text = text.replace("probe_run python3 ", f'probe_run "{binary_dir / "probe-python"}" ')
         script = directory / f"validate-{name}.sh"
         script.write_text(text)
         scripts[name] = script
@@ -86,7 +94,7 @@ def direct_failure(script: Path, env: dict[str, str], signum: int | None, *, ear
         "READY_FIFO": str(fifo),
         "PID_FILE": str(pid_file),
         "PROBE_MODE": "early" if early else "hang",
-        "PROBE_TARGET": {"validate-gogcli.sh": "gog", "validate-officecli.sh": "officecli"}.get(script.name, "probe-python"),
+        "PROBE_TARGET": {"validate-gogcli.sh": "gog", "validate-officecli.sh": "officecli"}.get(script.name, "inventory"),
         "OPENCLAW_PROBE_TIMEOUT_SECONDS": "15" if signum is None else "30",
     }
     process = subprocess.Popen(
@@ -163,6 +171,23 @@ def direct_handoff(script: Path, env: dict[str, str]) -> None:
             process.wait()
 
 
+def interpreter_launches(directory: Path) -> None:
+    """The installed chain, with no keyring file, starts python3 six times: a supervisor per validator and one help probe."""
+    recorder_dir = directory / "recorder"
+    recorder_dir.mkdir()
+    log = directory / "python3-launches"
+    recorder = recorder_dir / "python3"
+    recorder.write_text(f'#!/bin/sh\nprintf \'%s\\n\' "$2" >> "{log}"\nexec "{sys.executable}" "$@"\n')
+    recorder.chmod(0o755)
+    env = os.environ | {"PATH": f'{recorder_dir}:{os.environ["PATH"]}'}
+    env.pop("GOG_KEYRING_PASSWORD_FILE", None)
+    subprocess.run([*(str(SOURCE / f"validate-{name}.sh") for name in VALIDATORS), "true"], env=env, timeout=600, check=True)
+    launches = [Path(line).name for line in log.read_text().splitlines()]
+    expected = ["startup-probe.py", "startup-probe.py", "startup-probe.py", "soul_guardian.py", "startup-probe.py", "startup-probe.py"]
+    assert launches == expected, launches
+    print(f"default validator chain started python3 {len(launches)} times", flush=True)
+
+
 def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "--fake":
         sys.argv = sys.argv[2:]
@@ -192,6 +217,7 @@ def main() -> None:
             print(f"{name}: invalid policy, timeout, HUP/INT/TERM cleanup passed", flush=True)
         direct_failure(scripts["gogcli"], env, None, early=True)
         direct_handoff(scripts["gogcli"], env)
+        interpreter_launches(Path(temporary))
     print("normal entrypoint and direct final handoff passed", flush=True)
 
 

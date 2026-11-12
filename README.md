@@ -16,9 +16,11 @@ Runtime skill usage policy lives in `docker/openclaw/*-soul.md`. The image combi
 
 ## Startup probe policy
 
-Each external validation probe has a 30-second deadline and a 2-second termination grace. Override these with `OPENCLAW_PROBE_TIMEOUT_SECONDS` and `OPENCLAW_PROBE_GRACE_SECONDS`; both must be positive decimal seconds (fractions are allowed, but empty, zero, negative, non-finite, whitespace and exponent forms are rejected before any probe). Invalid policy exits 2, timeout exits 124, and handled HUP, INT or TERM exits 128 plus the signal number. Probe output is suppressed; captured output and file-backed passwords are private and trailing newlines are stripped.
+Each validator starts one `startup-probe.py` supervisor per run. It first checks the installed-asset inventory in a forked child of that same interpreter, using the `installed-assets.py` beside the validator, and then runs the validator's CLI or help probe if it has one; a failed inventory check ends the validator before any installed code runs. With no `GOG_KEYRING_PASSWORD_FILE`, the five validators start `python3` six times in total: one supervisor each plus `soul_guardian.py --help`.
 
-The shared Python supervisor terminates the probe process group, escalates to KILL after the grace on timeout or cancellation, and reaps owned descendants on Linux. Residual group members are terminated on ordinary completion too, and the grace wait ends as soon as the group is gone. On Linux, descendants that left the group (for example with `setsid`) are still reaped: they receive TERM, then KILL after the grace, and the supervisor stops waiting for them after a second grace. Uninterruptible kernel waits are not covered. The final command is executed unchanged, outside the deadline, after supervision and capture files have been removed. Direct validator use requires POSIX sh, Python 3 with `waitid`/`WNOWAIT`, writable temporary storage, and both `startup-probe` helpers beside the validator; Linux also requires working `prctl` subreaper support. Darwin supports process-group termination for host tests; Linux is the descendant-reaping authority.
+Each of those steps, like every other external validation probe, runs in its own session with its own 30-second deadline and 2-second termination grace. Override these with `OPENCLAW_PROBE_TIMEOUT_SECONDS` and `OPENCLAW_PROBE_GRACE_SECONDS`; both must be positive decimal seconds (fractions are allowed, but empty, zero, negative, non-finite, whitespace and exponent forms are rejected before any probe). Invalid policy exits 2, timeout exits 124, and handled HUP, INT or TERM exits 128 plus the signal number. Probe output is suppressed; captured output and file-backed passwords are private and trailing newlines are stripped.
+
+The shared Python supervisor terminates the probe process group, escalates to KILL after the grace on timeout or cancellation, and reaps owned descendants on Linux. Residual group members are terminated on ordinary completion too, and the grace wait ends as soon as the group is gone. On Linux, descendants that left the group (for example with `setsid`) are still reaped: they receive TERM, then KILL after the grace, and the supervisor stops waiting for them after a second grace. Uninterruptible kernel waits are not covered. The final command is executed unchanged, outside the deadline, after supervision and capture files have been removed. Direct validator use requires POSIX sh, Python 3 with `waitid`/`WNOWAIT`, writable temporary storage, and both `startup-probe` helpers and `installed-assets.py` beside the validator; Linux also requires working `prctl` subreaper support. Darwin supports process-group termination for host tests; Linux is the descendant-reaping authority.
 
 ## Bootstrap completion event
 
@@ -36,11 +38,15 @@ MARACLAW_OPENCLAW_IMAGE=openclaw:2026.11.3 ./build-openclaw-local-dockerfile.sh
 
 Set `DOCKER_PLATFORM=linux/amd64` for the other supported target. If you override a pin, override its paired version and checksum together.
 
+Each `ARG` in the final stage is declared directly above the first `RUN` that reads it, and the apt layer is separate from the OpenClaw install, because BuildKit adds every build argument that has a value to the environment of each later `RUN`. Changing a pin therefore rebuilds from its first reader onward: a gogcli, OfficeCLI or skill archive pin, or `OPENCLAW_ASSET_MODE`, leaves the apt and OpenClaw layers cached. Keep new pins beside their reader, not at the top of the stage.
+
+To reuse layers on a fresh builder, both scripts pass `OPENCLAW_BUILD_CACHE_FROM` as `--cache-from` and `OPENCLAW_BUILD_CACHE_TO` as `--cache-to`, each a BuildKit cache spec forwarded verbatim and only when set and nonempty (for example `type=local,src=/path/to/cache` and `type=local,dest=/path/to/cache,mode=max`, or `type=registry,ref=youruser/openclaw:buildcache`). No cache flag is passed by default, since the default docker driver can reject cache export, and the release workflow sets neither.
+
 OpenClaw is installed with `npm ci` from the committed `docker/openclaw/openclaw-package/package-lock.json` into `/opt/openclaw`, and `/usr/local/bin/openclaw` links to it. The build fails if `OPENCLAW_VERSION` differs from the locked openclaw version, and it checks the OpenClaw tarball against both `OPENCLAW_SHA256` and the lock's integrity. To bump OpenClaw, update the version in `package.json` and `Dockerfile.openclaw`, delete the lock, and regenerate it:
 
 ```bash
 docker run --rm --platform linux/arm64 -v "$PWD/docker/openclaw/openclaw-package":/work -w /work --entrypoint sh \
-  nikolaik/python-nodejs:python3.15-nodejs26-slim@sha256:552fd665f95f93fbbba5d145807667ddbf3b62fd45d555541b62eed7310cfe19 \
+  nikolaik/python-nodejs:python3.15-nodejs26-slim@sha256:97081a38e971a9f06c2ae1fcf778d77c9e53f8c94fa1a9c9e300c1f3c9956f0a \
   -c 'npm install -g npm@12.2.2 && npm install --package-lock-only --install-strategy=shallow --ignore-scripts --allow-remote=all --no-audit --no-fund'
 ```
 

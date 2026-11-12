@@ -7,7 +7,7 @@ from typing import Final
 
 import pytest
 
-from openclaw_probe_test_support import clean_policy, exercise_script_lookup, prepare_integrity, rebaseline
+from openclaw_probe_test_support import clean_policy, exercise_script_lookup, prepare_integrity, python_launches, rebaseline
 
 VALIDATOR: Final = Path(__file__).resolve().parents[1] / "docker/openclaw/validate-humanizer.sh"
 
@@ -67,3 +67,8 @@ def test_missing_inventory_blocks_child(humanizer: tuple[Path, dict[str, str]]) 
     result = subprocess.run(["sh", env["VALIDATOR"], "sh", "-c", 'touch "$CHILD_LOG"'], env=env, capture_output=True, text=True, timeout=10, check=False)
     assert result.returncode != 0
     assert not Path(env["CHILD_LOG"]).exists()
+
+
+def test_humanizer_starts_one_interpreter(humanizer: tuple[Path, dict[str, str]]) -> None:
+    _, env = humanizer
+    assert python_launches(Path(env["VALIDATOR"]), env) == ["startup-probe.py"]

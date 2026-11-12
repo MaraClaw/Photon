@@ -8,7 +8,8 @@ from test_openclaw_officecli_dockerfile import DOCKERFILE, _instructions
 INSTALL: Final = "npm ci --prefix /opt/openclaw --install-strategy=shallow --omit=dev --no-audit --no-fund"
 CLEANUP: Final = "rm -rf /root/.npm"
 VALID_SOURCE: Final = (
-    f'USER root\nRUN npm pack "openclaw@${{OPENCLAW_VERSION}}" \\\n'
+    "USER root\nRUN apt-get update && rm -rf /var/lib/apt/lists/*\n"
+    f'RUN npm pack "openclaw@${{OPENCLAW_VERSION}}" \\\n'
     f"    && {INSTALL} \\\n"
     f"    && {CLEANUP}\nUSER node\nRUN npm cache verify\n"
 )
@@ -17,19 +18,21 @@ VALID_SOURCE: Final = (
 def _assert_root_cache_cleanup(source: str) -> None:
     instructions, errors = _instructions(source)
     assert errors == ()
-    run_index = next(index for index, (name, _body) in enumerate(instructions) if name == "RUN")
+    install_runs = tuple(index for index, (name, body) in enumerate(instructions) if name == "RUN" and "npm ci" in body)
+    assert len(install_runs) == 1, "exactly one RUN must install OpenClaw with npm ci"
+    run_index = install_runs[0]
     users = tuple(body for name, body in instructions[:run_index] if name == "USER")
-    assert users, "the first install RUN must explicitly select a user"
-    assert users[-1] == "root", "the first install RUN must execute as root"
+    assert users, "the npm ci RUN must explicitly select a user"
+    assert users[-1] == "root", "the npm ci RUN must execute as root"
 
     # Only inspect this straight && chain; other RUNs contain unrelated shell syntax.
     commands = tuple(tuple(shlex.split(command)) for command in instructions[run_index][1].split("&&"))
     install = tuple(shlex.split(INSTALL))
     cleanup = tuple(shlex.split(CLEANUP))
-    assert install in commands, "the first root RUN must install OpenClaw"
+    assert install in commands, "the npm ci RUN must install OpenClaw with the pinned options"
     assert cleanup in commands, "remove /root/.npm in the same root RUN as installation"
     assert commands.index(cleanup) > commands.index(install), "remove /root/.npm after npm install"
-    assert commands[-1] == cleanup, "root npm cleanup must finish the first root RUN"
+    assert commands[-1] == cleanup, "root npm cleanup must finish the npm ci RUN"
 
 
 def test_root_npm_cache_is_removed_when_guest_install_layer_finishes() -> None:
@@ -42,7 +45,7 @@ def test_root_npm_cache_is_removed_when_guest_install_layer_finishes() -> None:
 
 
 def test_root_cache_contract_accepts_cleanup_when_in_the_install_run() -> None:
-    # Given a continued root install RUN followed by node's independent cache work.
+    # Given an apt layer, then a continued root install RUN, then node's independent cache work.
     source = VALID_SOURCE
 
     # When checking the install layer contract.
@@ -66,6 +69,11 @@ def test_root_cache_contract_accepts_cleanup_when_in_the_install_run() -> None:
         ),
         pytest.param(VALID_SOURCE.replace("/root/.npm", "/home/node/.npm"), "same root RUN", id="wrong-node-cache"),
         pytest.param(VALID_SOURCE.replace("USER root", "USER node"), "execute as root", id="wrong-user"),
+        pytest.param(
+            VALID_SOURCE.replace(f" \\\n    && {CLEANUP}", "").replace("apt-get update", f"apt-get update && {CLEANUP}"),
+            "same root RUN",
+            id="cleanup-in-apt-layer",
+        ),
     ],
 )
 def test_root_cache_contract_rejects_cleanup_when_scope_or_order_is_wrong(source: str, expected_error: str) -> None:
