@@ -3,6 +3,7 @@
 # Sourced by validate-*.sh, which set probe_dir.
 # shellcheck disable=SC2154
 probe_helper=$probe_dir/startup-probe.py
+probe_assets=$probe_dir/installed-assets.py
 probe_pid=
 probe_file=
 probe_sequence=0
@@ -75,6 +76,17 @@ probe_wait() {
 probe_run() {
     probe_check_cancelled
     python3 -B "$probe_helper" --run "$@" 3<"$probe_control" >/dev/null &
+    probe_wait
+}
+
+# probe_verify COMPONENT INVENTORY_DIR SKILLS_ROOT [COMMAND...]
+# Starts the validator's one supervisor: it checks the installed-asset inventory with the
+# helper beside the validator, then runs COMMAND if one is given, each under its own
+# deadline. Returns 0, 1 when the inventory check failed (COMMAND never starts) or 3 when
+# COMMAND failed; probe_status keeps that value.
+probe_verify() {
+    probe_check_cancelled
+    python3 -B "$probe_helper" --verify "$probe_assets" "$@" 3<"$probe_control" >/dev/null &
     probe_wait
 }
 

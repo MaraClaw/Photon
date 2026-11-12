@@ -103,7 +103,23 @@ def clean_policy(env: dict[str, str]) -> None:
         env.pop(key, None)
 
 
-def install_hang(root: Path, env: dict[str, str], target: Path, *, python_probe: str = "") -> None:
+INVENTORY_STEP = "def verify(component: str, inventory_dir: Path, skills_root: Path | None) -> None:\n"
+
+
+def python_launches(script: Path, env: dict[str, str]) -> list[str]:
+    """Run the validator behind a recording python3; return the script name of each interpreter it started."""
+    bin_dir = Path(env["PATH"].split(os.pathsep)[0])
+    log = bin_dir / "python3-launches"
+    recorder = bin_dir / "python3"
+    recorder.unlink(missing_ok=True)
+    recorder.write_text(f'#!/bin/sh\nprintf \'%s\\n\' "$2" >> {shlex.quote(str(log))}\nexec {shlex.quote(sys.executable)} "$@"\n')
+    recorder.chmod(0o755)
+    result = subprocess.run(["/bin/sh", str(script), "/bin/sh", "-c", ":"], env=env, capture_output=True, text=True, timeout=30, check=False)
+    assert result.returncode == 0, result.stderr
+    return [Path(line).name for line in log.read_text().splitlines()]
+
+
+def hang_actor(root: Path, env: dict[str, str]) -> Path:
     actor = root / "probe_actor.py"
     actor.write_text(
         "import os, signal\n"
@@ -128,13 +144,25 @@ def install_hang(root: Path, env: dict[str, str], target: Path, *, python_probe:
     env["PROBE_READY"] = str(root / "probe-ready")
     env["PROBE_PID_FILE"] = str(root / "probe-pids")
     os.mkfifo(env["PROBE_READY"])
-    command = f"exec {shlex.quote(sys.executable)} {shlex.quote(str(actor))}"
+    return actor
+
+
+def install_inventory_hang(root: Path, env: dict[str, str]) -> None:
+    """Hang the inventory step: the helper beside the validator becomes the actor as soon as verify() starts."""
+    actor = hang_actor(root, env)
+    helper = Path(env["INTEGRITY_HELPER"])
+    source = helper.read_text()
+    assert source.count(INVENTORY_STEP) == 1
+    helper.write_text(source.replace(INVENTORY_STEP, f"{INVENTORY_STEP}    os.execv({sys.executable!r}, [{sys.executable!r}, {str(actor)!r}])\n"))
+
+
+def install_hang(root: Path, env: dict[str, str], target: Path, *, python_probe: bool = False) -> None:
+    command = f"exec {shlex.quote(sys.executable)} {shlex.quote(str(hang_actor(root, env)))}"
     if python_probe:
         target.unlink(missing_ok=True)
-        pattern = "*installed-assets.py" if python_probe == "integrity" else "*soul_guardian.py"
         target.write_text(
             f'#!/bin/sh\nif [ "$1" = "-B" ]; then\n'
-            f'  case "$2" in {pattern}) {command} ;; esac\nfi\n'
+            f'  case "$2" in *soul_guardian.py) {command} ;; esac\nfi\n'
             f'exec {shlex.quote(sys.executable)} "$@"\n'
         )
     else:
