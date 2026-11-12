@@ -10,7 +10,7 @@ import pytest
 
 from openclaw_probe_test_support import (
     INVALID_POLICY, POLICY_KEYS, clean_policy, exercise_final_child,
-    exercise_invalid_policy, exercise_script_lookup, exercise_signal, exercise_success_cleanup, exercise_timeout, install_hang, prepare_integrity, rebaseline,
+    exercise_invalid_policy, exercise_script_lookup, exercise_signal, exercise_success_cleanup, exercise_timeout, install_hang, prepare_integrity, python_launches, rebaseline,
 )
 
 VALIDATORS = Path(__file__).resolve().parents[1] / "docker/openclaw"
@@ -255,3 +255,9 @@ def test_home_cannot_redirect_cli_to_unverified_skills(cli_validator: tuple[Path
     assert result.returncode == 1
     assert not Path(env["PROBE_LOG"]).exists()
     assert not Path(env["CHILD_LOG"]).exists()
+
+
+def test_cli_validator_without_keyring_starts_one_interpreter(cli_validator: tuple[Path, dict[str, str], str]) -> None:
+    script, env, name = cli_validator
+    assert python_launches(script, env) == ["startup-probe.py"]
+    assert Path(env["PROBE_LOG"]).read_text().splitlines() == [f"{name}:--version"]
