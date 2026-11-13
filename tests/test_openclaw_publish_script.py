@@ -344,7 +344,12 @@ def test_scripts_delegate_to_the_shared_common_file(tmp_path: Path, script: Path
     assert result.returncode == 0, result.stderr
     args = read_docker_argv(log_path)
     assert "SHARED_SENTINEL=pins" in args
-    assert any(argument.startswith("SHARED_SENTINEL_ASSETS=") and "common/humanizer.tar.gz" in argument for argument in args)
+    assert any(
+        argument.startswith("SHARED_SENTINEL_ASSETS=")
+        and "common/humanizer.tar.gz" in argument
+        and "common/tracelattice-skill.tar.gz" in argument
+        for argument in args
+    )
     prefix = "openclaw-publish" if script == PUBLISH_SCRIPT else "openclaw-build"
     assert any(argument.startswith(f"SHARED_SENTINEL_ASSETS={prefix} ") for argument in args)
     # Cache flags come only from the shared collector: the scripts assemble none themselves.
@@ -410,12 +415,17 @@ def test_docker_failure_propagates_without_false_success(tmp_path: Path, script:
     assert "Published" not in result.stdout
 
 
-@pytest.mark.parametrize("missing", [None, "linux-amd64/officecli", "linux-arm64/gogcli.tar.gz", "common/soul-guardian.tar.gz", "common/humanizer.tar.gz"])
+@pytest.mark.parametrize(
+    "missing",
+    [None, "linux-amd64/officecli", "linux-arm64/gogcli.tar.gz", "common/soul-guardian.tar.gz", "common/humanizer.tar.gz",
+     "common/tracelattice-skill.tar.gz"],
+)
 def test_staged_publish_requires_both_targets_before_docker(tmp_path: Path, missing: str | None) -> None:
     bin_dir, log_path = install_fake_docker(tmp_path)
     assets = tmp_path / "assets with spaces"
     for name in ("linux-amd64/gogcli.tar.gz", "linux-amd64/officecli", "linux-arm64/gogcli.tar.gz",
-                 "linux-arm64/officecli", "common/officecli-SKILL.md", "common/gogcli-skills.tar.gz", "common/soul-guardian.tar.gz", "common/humanizer.tar.gz"):
+                 "linux-arm64/officecli", "common/officecli-SKILL.md", "common/gogcli-skills.tar.gz", "common/soul-guardian.tar.gz", "common/humanizer.tar.gz",
+                 "common/tracelattice-skill.tar.gz"):
         if name != missing:
             path = assets / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -440,7 +450,8 @@ def test_staged_publish_keeps_staged_arguments_and_tags_with_archive_pins(tmp_pa
     bin_dir, log_path = install_fake_docker(tmp_path)
     assets = tmp_path / "assets with spaces"
     for name in ("linux-amd64/gogcli.tar.gz", "linux-amd64/officecli", "linux-arm64/gogcli.tar.gz",
-                 "linux-arm64/officecli", "common/officecli-SKILL.md", "common/gogcli-skills.tar.gz", "common/soul-guardian.tar.gz", "common/humanizer.tar.gz"):
+                 "linux-arm64/officecli", "common/officecli-SKILL.md", "common/gogcli-skills.tar.gz", "common/soul-guardian.tar.gz", "common/humanizer.tar.gz",
+                 "common/tracelattice-skill.tar.gz"):
         path = assets / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()

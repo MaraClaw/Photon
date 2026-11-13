@@ -14,7 +14,8 @@ Build and load one local OpenClaw image. Environment settings:
   OPENCLAW_BUILD_CACHE_FROM    optional BuildKit cache to import, passed to --cache-from
   OPENCLAW_BUILD_CACHE_TO      optional BuildKit cache to export, passed to --cache-to
   OPENCLAW_VERSION, OPENCLAW_SHA256, GOGCLI_VERSION, GOGCLI_{AMD64,ARM64}_SHA256,
-  OFFICECLI_VERSION, OFFICECLI_{ARM64,AMD64,SKILL}_SHA256
+  OFFICECLI_VERSION, OFFICECLI_{ARM64,AMD64,SKILL}_SHA256,
+  TRACELATTICE_VERSION, TRACELATTICE_SHA256
                                optional pins; defaults come from Dockerfile.openclaw
   GOGCLI_SKILLS_COMMIT         optional gogcli-skills archive commit (default: installer pin)
   GOGCLI_SKILLS_SHA256         optional gogcli-skills archive digest (default: installer pin)
@@ -22,6 +23,8 @@ Build and load one local OpenClaw image. Environment settings:
   CLAWSEC_SHA256               optional Soul Guardian archive digest (default: installer pin)
   HUMANIZER_COMMIT             optional Humanizer archive commit (default: installer pin)
   HUMANIZER_SHA256             optional Humanizer archive digest (default: installer pin)
+  TRACELATTICE_SKILL_COMMIT    optional TraceLattice skill archive commit (default: installer pin)
+  TRACELATTICE_SKILL_SHA256    optional TraceLattice skill archive digest (default: installer pin)
 
 The selected env file is sourced from the script directory if it exists;
 its assignments override inherited environment values. Empty values use defaults.
@@ -72,7 +75,8 @@ openclaw_collect_pin_args
 
 openclaw_collect_asset_args openclaw-build \
     "linux-${DOCKER_PLATFORM#linux/}/gogcli.tar.gz" "linux-${DOCKER_PLATFORM#linux/}/officecli" \
-    common/officecli-SKILL.md common/gogcli-skills.tar.gz common/soul-guardian.tar.gz common/humanizer.tar.gz
+    common/officecli-SKILL.md common/gogcli-skills.tar.gz common/soul-guardian.tar.gz common/humanizer.tar.gz \
+    common/tracelattice-skill.tar.gz
 
 openclaw_collect_cache_args
 
