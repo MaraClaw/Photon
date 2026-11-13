@@ -24,11 +24,18 @@ def prepare_integrity(root: Path, skills: Path, env: dict[str, str], script: Pat
     env["HOME"] = str(skills.parent.parent)
     binaries = root / "integrity-binaries"
     binaries.mkdir(exist_ok=True)
-    for name in ("gog", "officecli"):
+    for name in ("gog", "officecli", "tracelattice"):
         binary = binaries / name
         if not binary.exists():
             binary.write_text("fixture\n")
-    for name in ("gog", "crabbox", "officecli", "soul-guardian", "tavily-search", "tavily-crawl", "humanizer"):
+    package = binaries / "tracelattice-package"
+    if not package.exists():
+        cli = package / "node_modules/@iworkforces/tracelattice/dist/cli.js"
+        cli.parent.mkdir(parents=True)
+        cli.write_text("fixture\n")
+        (package / "node_modules/.bin").mkdir()
+        (package / "node_modules/.bin/tracelattice").symlink_to("../@iworkforces/tracelattice/dist/cli.js")
+    for name in ("gog", "crabbox", "officecli", "soul-guardian", "tavily-search", "tavily-crawl", "humanizer", "tracelattice-skill"):
         directory = skills / name
         directory.mkdir(parents=True, exist_ok=True)
         if not any(directory.iterdir()):
@@ -45,8 +52,17 @@ def prepare_integrity(root: Path, skills: Path, env: dict[str, str], script: Pat
         if source != destination:
             shutil.copy2(source, destination)
     helper = root / "installed-assets.py"
-    helper.write_text(helper.read_text().replace("/usr/local/bin/gog", env.get("INTEGRITY_BINARY_GOG", str(binaries / "gog"))).replace("/usr/local/bin/officecli", env.get("INTEGRITY_BINARY_OFFICECLI", str(binaries / "officecli"))))
+    source = helper.read_text().replace("/usr/local/bin/gog", env.get("INTEGRITY_BINARY_GOG", str(binaries / "gog"))).replace("/usr/local/bin/officecli", env.get("INTEGRITY_BINARY_OFFICECLI", str(binaries / "officecli")))
+    tracelattice = {
+        "/usr/local/bin/tracelattice": env.get("INTEGRITY_BINARY_TRACELATTICE", str(binaries / "tracelattice")),
+        "/opt/tracelattice": env.get("INTEGRITY_PACKAGE_TRACELATTICE", str(package)),
+    }
+    for literal, fixture in tracelattice.items():
+        assert source.count(f'"{literal}"') == 1
+        source = source.replace(f'"{literal}"', json.dumps(fixture))
+    helper.write_text(source)
     env.update({"INTEGRITY_HELPER": str(helper), "INTEGRITY_SKILLS": str(skills), "INTEGRITY_ROOTS": str(roots), "INTEGRITY_DIR": str(inventory), "VALIDATOR": str(validator)})
+    env.update({"INTEGRITY_BINARY_TRACELATTICE": tracelattice["/usr/local/bin/tracelattice"], "INTEGRITY_PACKAGE_TRACELATTICE": tracelattice["/opt/tracelattice"]})
     rebaseline(env)
     return validator
 

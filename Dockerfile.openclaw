@@ -132,20 +132,48 @@ RUN --mount=type=bind,from=openclaw_assets,target=/staged \
         staged) sh /tmp/install-humanizer.sh --archive-file /staged/common/humanizer.tar.gz ;; \
         *) exit 2 ;; \
     esac && rm /tmp/install-humanizer.sh
+COPY docker/openclaw/install-tracelattice-skill.sh /tmp/install-tracelattice-skill.sh
+ARG TRACELATTICE_SKILL_COMMIT
+ARG TRACELATTICE_SKILL_SHA256
+RUN --mount=type=bind,from=openclaw_assets,target=/staged \
+    case "$OPENCLAW_ASSET_MODE" in \
+        online) sh /tmp/install-tracelattice-skill.sh ;; \
+        staged) sh /tmp/install-tracelattice-skill.sh --archive-file /staged/common/tracelattice-skill.tar.gz ;; \
+        *) exit 2 ;; \
+    esac && rm /tmp/install-tracelattice-skill.sh
 COPY docker/openclaw/humanizer-soul.md /tmp/humanizer-soul.md
 COPY docker/openclaw/officecli-soul.md /tmp/officecli-soul.md
 COPY docker/openclaw/soul-guardian-soul.md /tmp/soul-guardian-soul.md
 COPY docker/openclaw/tavily-soul.md /tmp/tavily-soul.md
+COPY docker/openclaw/tracelattice-soul.md /tmp/tracelattice-soul.md
 RUN template="/opt/openclaw/node_modules/openclaw/docs/reference/templates/SOUL.md" \
     && test -s "$template" \
     && install -d -m 0755 /usr/local/share/openclaw \
-    && cat /tmp/humanizer-soul.md /tmp/officecli-soul.md /tmp/soul-guardian-soul.md /tmp/tavily-soul.md > /usr/local/share/openclaw/skills-soul.md \
+    && cat /tmp/humanizer-soul.md /tmp/officecli-soul.md /tmp/soul-guardian-soul.md /tmp/tavily-soul.md /tmp/tracelattice-soul.md > /usr/local/share/openclaw/skills-soul.md \
     && chmod 0644 /usr/local/share/openclaw/skills-soul.md \
     && cat /usr/local/share/openclaw/skills-soul.md >> "$template" \
-    && rm /tmp/humanizer-soul.md /tmp/officecli-soul.md /tmp/soul-guardian-soul.md /tmp/tavily-soul.md
+    && rm /tmp/humanizer-soul.md /tmp/officecli-soul.md /tmp/soul-guardian-soul.md /tmp/tavily-soul.md /tmp/tracelattice-soul.md
 COPY docker/openclaw/tavily-skills/ /tmp/tavily-skills/
 COPY docker/openclaw/install-tavily.sh /tmp/install-tavily.sh
 RUN sh /tmp/install-tavily.sh && rm /tmp/install-tavily.sh /tmp/install-common.sh
+ARG TRACELATTICE_VERSION=2.4.5
+ARG TRACELATTICE_SHA256=sha256:493ea40faacc34821b006c5774f7cce0cb7247ed63e694b02bb0a80495696666
+RUN --mount=type=bind,source=docker/openclaw/tracelattice-package,target=/tmp/tracelattice-package \
+    install -D -m 0644 -t /opt/tracelattice /tmp/tracelattice-package/package.json /tmp/tracelattice-package/package-lock.json \
+    && LOCKED_VERSION=$(node -p 'require("/opt/tracelattice/package-lock.json").packages["node_modules/@iworkforces/tracelattice"].version') \
+    && if [ "$LOCKED_VERSION" != "$TRACELATTICE_VERSION" ]; then printf 'TRACELATTICE_VERSION=%s does not match the tracelattice version %s locked in docker/openclaw/tracelattice-package/package-lock.json\n' "$TRACELATTICE_VERSION" "$LOCKED_VERSION" >&2; exit 1; fi \
+    && npm pack "@iworkforces/tracelattice@${TRACELATTICE_VERSION}" --pack-destination /tmp --cache /tmp/tracelattice-npm-cache \
+    && TRACELATTICE_TARBALL="/tmp/iworkforces-tracelattice-${TRACELATTICE_VERSION}.tgz" \
+    && test -f "$TRACELATTICE_TARBALL" \
+    && printf '%s  %s\n' "${TRACELATTICE_SHA256#sha256:}" "$TRACELATTICE_TARBALL" > /tmp/tracelattice.tgz.sha256 \
+    && sha256sum -c /tmp/tracelattice.tgz.sha256 \
+    && LOCKED_SHA512=$(node -p 'Buffer.from(require("/opt/tracelattice/package-lock.json").packages["node_modules/@iworkforces/tracelattice"].integrity.slice(7), "base64").toString("hex")') \
+    && printf '%s  %s\n' "$LOCKED_SHA512" "$TRACELATTICE_TARBALL" > /tmp/tracelattice.lock.sha512 \
+    && sha512sum -c /tmp/tracelattice.lock.sha512 \
+    && npm ci --prefix /opt/tracelattice --install-strategy=shallow --omit=dev --ignore-scripts --no-audit --no-fund --cache /tmp/tracelattice-npm-cache \
+    && rm -f "$TRACELATTICE_TARBALL" /tmp/tracelattice.tgz.sha256 /tmp/tracelattice.lock.sha512 \
+    && rm -rf /tmp/tracelattice-npm-cache
+COPY --chmod=0755 docker/openclaw/tracelattice.sh /usr/local/bin/tracelattice
 COPY docker/openclaw/check-skills.py /tmp/check-skills.py
 RUN python3 /tmp/check-skills.py --skills-root "$HOME/.openclaw/skills" && rm /tmp/check-skills.py
 COPY docker/openclaw/installed-assets.py /usr/local/bin/installed-assets.py
@@ -158,11 +186,13 @@ COPY --chmod=0755 docker/openclaw/validate-officecli.sh /usr/local/bin/validate-
 COPY --chmod=0755 docker/openclaw/validate-soul-guardian.sh /usr/local/bin/validate-soul-guardian.sh
 COPY --chmod=0755 docker/openclaw/validate-tavily.sh /usr/local/bin/validate-tavily.sh
 COPY --chmod=0755 docker/openclaw/validate-humanizer.sh /usr/local/bin/validate-humanizer.sh
+COPY --chmod=0755 docker/openclaw/validate-tracelattice.sh /usr/local/bin/validate-tracelattice.sh
 COPY --chmod=0755 docker/openclaw/startup-probe.sh /usr/local/bin/startup-probe.sh
 COPY --chmod=0755 docker/openclaw/startup-probe.py /usr/local/bin/startup-probe.py
 COPY --chmod=0755 docker/openclaw/bootstrap_event.py /usr/local/bin/bootstrap_event.py
+COPY --chmod=0755 docker/openclaw/builtin_mcp.py /usr/local/bin/builtin_mcp.py
 COPY --chmod=0755 docker/openclaw/bootstrap-agent-container.py /usr/local/bin/bootstrap-agent-container.py
 
 USER node
-ENTRYPOINT ["tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh", "/usr/local/bin/validate-officecli.sh", "/usr/local/bin/validate-soul-guardian.sh", "/usr/local/bin/validate-tavily.sh", "/usr/local/bin/validate-humanizer.sh", "/usr/local/bin/bootstrap-agent-container.py"]
+ENTRYPOINT ["tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh", "/usr/local/bin/validate-officecli.sh", "/usr/local/bin/validate-soul-guardian.sh", "/usr/local/bin/validate-tavily.sh", "/usr/local/bin/validate-humanizer.sh", "/usr/local/bin/validate-tracelattice.sh", "/usr/local/bin/bootstrap-agent-container.py"]
 CMD ["openclaw", "gateway"]

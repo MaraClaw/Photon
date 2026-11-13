@@ -18,7 +18,7 @@ VALID_SOURCE: Final = (
 def _assert_root_cache_cleanup(source: str) -> None:
     instructions, errors = _instructions(source)
     assert errors == ()
-    install_runs = tuple(index for index, (name, body) in enumerate(instructions) if name == "RUN" and "npm ci" in body)
+    install_runs = tuple(index for index, (name, body) in enumerate(instructions) if name == "RUN" and "npm ci --prefix /opt/openclaw" in body)
     assert len(install_runs) == 1, "exactly one RUN must install OpenClaw with npm ci"
     run_index = install_runs[0]
     users = tuple(body for name, body in instructions[:run_index] if name == "USER")
