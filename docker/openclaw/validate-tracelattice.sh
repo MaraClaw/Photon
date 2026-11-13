@@ -23,7 +23,7 @@ if ! probe_verify tracelattice /usr/local/share/openclaw-integrity "$HOME/.openc
 fi
 
 skill_dir="$HOME/.openclaw/skills/tracelattice-skill"
-for asset in SKILL.md LICENSE; do
+for asset in SKILL.md LICENSE references/errors.md references/tool-calls.md; do
     if [ ! -f "$skill_dir/$asset" ] || [ ! -r "$skill_dir/$asset" ] || [ ! -s "$skill_dir/$asset" ]; then
         printf '%s\n' 'Required skill failed verification: tracelattice-skill' >&2
         exit 1

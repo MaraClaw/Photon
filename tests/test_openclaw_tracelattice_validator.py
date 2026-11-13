@@ -10,13 +10,15 @@ import pytest
 from openclaw_probe_test_support import clean_policy, exercise_script_lookup, prepare_integrity, python_launches, rebaseline
 
 VALIDATOR: Final = Path(__file__).resolve().parents[1] / "docker/openclaw/validate-tracelattice.sh"
+ASSETS: Final = ("SKILL.md", "LICENSE", "references/errors.md", "references/tool-calls.md")
 
 
 @pytest.fixture
 def tracelattice(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     skill = tmp_path / "home/.openclaw/skills/tracelattice-skill"
     skill.mkdir(parents=True)
-    for asset in ("SKILL.md", "LICENSE"):
+    (skill / "references").mkdir()
+    for asset in ASSETS:
         (skill / asset).write_bytes(b"fixture\n")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -44,7 +46,7 @@ def test_slashless_lookup(tracelattice: tuple[Path, dict[str, str]], tmp_path: P
     exercise_script_lookup((Path(env["VALIDATOR"]), env), tmp_path, (local, False))
 
 
-@pytest.mark.parametrize("asset", ["SKILL.md", "LICENSE"])
+@pytest.mark.parametrize("asset", ASSETS)
 @pytest.mark.parametrize("failure", ["missing", "empty", "tamper"])
 def test_invalid_or_tampered_skill_blocks_child(tracelattice: tuple[Path, dict[str, str]], asset: str, failure: str) -> None:
     skill, env = tracelattice
