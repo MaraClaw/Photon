@@ -2,7 +2,7 @@
 """Publish and enforce AgentBootstrapCompleted for the current guest lifetime.
 
 check-ready: validate the event, then probe /readyz. exec -- ACTION...: validate, then exec.
-COMMAND...: exec unchanged, or supervise `openclaw gateway` and publish once /readyz answers.
+COMMAND...: exec unchanged, or register the built-in MCP servers, supervise `openclaw gateway` and publish once /readyz answers.
 """
 
 import contextlib
@@ -20,6 +20,7 @@ from pathlib import Path
 from types import FrameType
 from typing import Final
 
+import builtin_mcp
 from bootstrap_event import (
     EVENT_NAME,
     GuestIdentity,
@@ -186,6 +187,7 @@ def serve_gateway(command: list[str]) -> int:
     identity = GuestIdentity.read()
     signals = SignalQueue()
     invalidate_event()
+    builtin_mcp.register(report)
     try:
         child = subprocess.Popen(command, start_new_session=True)
     except OSError as error:

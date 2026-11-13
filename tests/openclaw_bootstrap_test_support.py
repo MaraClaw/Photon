@@ -41,11 +41,18 @@ def usr1(signum, frame):
 def ignored(signum, frame):
     note("signal-ignored", signum=signum)
 
+def config():
+    path = os.environ.get("OPENCLAW_CONFIG_PATH", "")
+    if not os.path.exists(path):
+        return None
+    with open(path) as source:
+        return source.read()
+
 terminate = ignored if os.environ.get("FAKE_MODE") == "ignore-term" else leave
 for number, handler in ((signal.SIGTERM, terminate), (signal.SIGHUP, leave), (signal.SIGINT, leave), (signal.SIGUSR1, usr1)):
     signal.signal(number, handler)
 signal.alarm(120)  # a gateway orphaned by a failed test ends itself
-note("start", pid=os.getpid(), argv=sys.argv[1:], stale_event=os.path.exists(os.environ["FAKE_EVENT"]))
+note("start", pid=os.getpid(), argv=sys.argv[1:], stale_event=os.path.exists(os.environ["FAKE_EVENT"]), config=config())
 if os.environ.get("FAKE_MODE") == "exit":
     sys.exit(int(os.environ.get("FAKE_EXIT", "0")))
 while True:
@@ -198,6 +205,7 @@ def make_guest(root: Path, port: int) -> Guest:
         '"/proc/sys/kernel/random/boot_id"': json.dumps(str(guest.boot_id)),
         '"/proc/1/stat"': json.dumps(str(guest.stat)),
     }, root / "bootstrap_event.py")
+    install("builtin_mcp.py", {}, root / "builtin_mcp.py")
     install("bootstrap-agent-container.py", {
         "TERMINATION_GRACE_SECONDS: Final = 2.0": "TERMINATION_GRACE_SECONDS: Final = 0.3",
         "READYZ_TIMEOUT_SECONDS: Final = 5.0": "READYZ_TIMEOUT_SECONDS: Final = 0.5",
@@ -208,7 +216,8 @@ def make_guest(root: Path, port: int) -> Guest:
     gateway.chmod(0o755)
     guest.set_identity()
     env = {key: value for key, value in os.environ.items() if not key.startswith(("OPENCLAW_", "FAKE_"))}
-    env.update(PATH=f"{gateway.parent}{os.pathsep}{env['PATH']}", FAKE_LOG=str(guest.log), FAKE_EVENT=str(event), OPENCLAW_GATEWAY_PORT=str(port), PYTHONDONTWRITEBYTECODE="1")
+    # The helper registers built-in MCP servers in the active config, which defaults to a path under HOME.
+    env.update(HOME=str(root / "home"), PATH=f"{gateway.parent}{os.pathsep}{env['PATH']}", FAKE_LOG=str(guest.log), FAKE_EVENT=str(event), OPENCLAW_GATEWAY_PORT=str(port), PYTHONDONTWRITEBYTECODE="1")
     guest.env.update(env)
     return guest
 
