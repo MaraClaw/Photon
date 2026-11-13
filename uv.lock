@@ -128,7 +128,7 @@ dev = [
 requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.2.0" },
     { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.8.0" },
-    { name = "pywhales", marker = "extra == 'dev'", specifier = ">=1.2.0" },
+    { name = "pywhales", marker = "extra == 'dev'", specifier = ">=1.2.5" },
 ]
 provides-extras = ["dev"]
 
@@ -280,7 +280,7 @@ wheels = [
 
 [[package]]
 name = "pywhales"
-version = "1.2.0"
+version = "1.2.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "boto3" },
@@ -289,9 +289,9 @@ dependencies = [
     { name = "s3transfer" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/64/61/97d43ba93ed6126ae1ec346cf7a6a82201a4268b27b3e013ba7886ebf5c3/pywhales-1.2.0.tar.gz", hash = "sha256:b9375662ad03ad681b5aa83878308259b0c7111413132f073000f944ea2ab0c3", size = 437148, upload-time = "2026-11-08T03:37:30.801Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/52/34/3c42e79a7f2cfcda90a98aeac38dd10486595dc8e51a23399a639367be29/pywhales-1.2.5.tar.gz", hash = "sha256:7d7c522818f3076b6f40c8700a6bb0cd9d87171dd1af6f012c167bed0be7408c", size = 458169, upload-time = "2026-11-12T09:47:59.082Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/89/b6/87f1fdeefd8f461b4a4a71a5ba3e92fc3620ec86570c0c7db9aeae77664f/pywhales-1.2.0-py3-none-any.whl", hash = "sha256:19557f29e848f5c8b3d41f299ed6c111955c3386ba74af8f0f56a6efd691619c", size = 345926, upload-time = "2026-11-08T03:37:29.442Z" },
+    { url = "https://files.pythonhosted.org/packages/d7/3e/73ba4f3b3e294c910f36ee85bf857e7f0c169359bc568a298fd194bc0cc7/pywhales-1.2.5-py3-none-any.whl", hash = "sha256:0b750e8359231cee6d4e89c23b6c9cd7e105a57c751c59d6bc35c43b3e8a4cdf", size = 361303, upload-time = "2026-11-12T09:47:57.431Z" },
 ]
 
 [[package]]

@@ -20,6 +20,10 @@ readyz = bootstrap_support.readyz
 GATEWAY = ("openclaw", "gateway")
 TIMEOUT = "OPENCLAW_BOOTSTRAP_TIMEOUT_SECONDS"
 PORT = "OPENCLAW_GATEWAY_PORT"
+CONFIG = "OPENCLAW_CONFIG_PATH"
+ENGINE_CONFIG = {"gateway": {"mode": "local"}, "skills": {"load": {"extraDirs": ["/home/node/.openclaw/skills"]}}}
+TRACELATTICE = {"command": "/usr/local/bin/tracelattice", "transport": "stdio"}
+DISABLED = json.dumps({"mcp": {"servers": {"tracelattice": {"enabled": False}}}})
 
 
 def wait_probed(readyz: Readyz, count: int = 3) -> None:
@@ -205,3 +209,35 @@ def test_unreadable_guest_identity_blocks_gateway_launch(guest: Guest, readyz: R
     assert guest.run(*GATEWAY).returncode == 1
     assert not guest.log.exists()
     assert readyz.hits == []
+
+
+def test_builtin_mcp_server_is_registered_before_the_gateway_starts(guest: Guest, readyz: Readyz) -> None:
+    config = guest.root / "openclaw.json"
+    config.write_text(json.dumps(ENGINE_CONFIG, indent=2))
+    with guest.running(*GATEWAY, **{CONFIG: str(config)}):
+        guest.wait_started()
+        seen = guest.starts()[0]["config"]
+        assert isinstance(seen, str)
+        assert json.loads(seen) == ENGINE_CONFIG | {"mcp": {"servers": {"tracelattice": TRACELATTICE}}}
+
+
+@pytest.mark.parametrize("content,reported", [(None, False), (DISABLED, False), ("not json", True)], ids=["missing", "disabled", "malformed"])
+def test_config_left_as_it_is_never_blocks_the_gateway(guest: Guest, readyz: Readyz, content: str | None, reported: bool) -> None:
+    config = guest.root / "openclaw.json"
+    if content is not None:
+        config.write_text(content)
+    with guest.running(*GATEWAY, **{CONFIG: str(config)}) as helper:
+        guest.wait_started()
+        readyz.status = 200
+        wait_until(guest.event.exists)
+        assert helper.poll() is None
+    assert (config.read_text() if config.exists() else None) == content
+    assert ("tracelattice not registered" in guest.output()) is reported
+
+
+@pytest.mark.parametrize("environment", [{TIMEOUT: "0"}, {PORT: "abc"}])
+def test_invalid_policy_leaves_the_config_untouched(guest: Guest, environment: dict[str, str]) -> None:
+    config = guest.root / "openclaw.json"
+    config.write_text("{}")
+    assert guest.run(*GATEWAY, env=environment | {CONFIG: str(config)}).returncode == 2
+    assert config.read_text() == "{}"

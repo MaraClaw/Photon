@@ -164,3 +164,13 @@ def test_openclaw_commands_other_than_the_gateway_server_run_unchanged(guest: Gu
     assert guest.starts()[0]["argv"] == list(arguments)
     assert not guest.event.exists()
     assert readyz.hits == []
+
+
+@pytest.mark.parametrize("arguments", [("check-ready",), ("exec", "--", "true"), ("true",), ("openclaw", "gateway", "status")])
+def test_only_the_gateway_server_registers_builtin_mcp_servers(guest: Guest, readyz: Readyz, tmp_path: Path, arguments: tuple[str, ...]) -> None:
+    config = tmp_path / "openclaw.json"
+    config.write_text("{}")
+    guest.write_event()
+    readyz.status = 200
+    assert guest.run(*arguments, env={"OPENCLAW_CONFIG_PATH": str(config), "FAKE_MODE": "exit"}).returncode == 0
+    assert config.read_text() == "{}"

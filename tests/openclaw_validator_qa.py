@@ -39,7 +39,7 @@ def main() -> None:
         architectures = [platform.removeprefix("linux/") for platform in platforms]
         required = [
             *(asset_root / f"linux-{architecture}" / name for architecture in architectures for name in ("gogcli.tar.gz", "officecli")),
-            *(asset_root / "common" / name for name in ("officecli-SKILL.md", "gogcli-skills.tar.gz", "soul-guardian.tar.gz", "humanizer.tar.gz")),
+            *(asset_root / "common" / name for name in ("officecli-SKILL.md", "gogcli-skills.tar.gz", "soul-guardian.tar.gz", "humanizer.tar.gz", "tracelattice-skill.tar.gz")),
         ]
         missing = [str(path) for path in required if not path.is_file()]
         if missing:
@@ -86,7 +86,25 @@ def main() -> None:
             print(
                 docker.run(
                     image,
-                    ["sh", "-c", 'for validator in gogcli officecli soul-guardian tavily humanizer; do "/usr/local/bin/validate-$validator.sh" true || exit; done'],
+                    ["sh", "-c", 'for validator in gogcli officecli soul-guardian tavily humanizer tracelattice; do "/usr/local/bin/validate-$validator.sh" true || exit; done'],
+                    name=container,
+                    remove=True,
+                    networks=["none"],
+                    platform=platform,
+                    timeout=600,
+                ),
+                end="",
+            )
+            print(f"Running built-in MCP server QA for {platform}: {container}", flush=True)
+            print(
+                docker.run(
+                    image,
+                    [
+                        "sh", "-c",
+                        'state=$(mktemp -d) && export OPENCLAW_STATE_DIR="$state" OPENCLAW_CONFIG_PATH="$state/openclaw.json" && printf "{}" > "$OPENCLAW_CONFIG_PATH" '
+                        '&& python3 -B -c "import sys; sys.path.insert(0, \\"/usr/local/bin\\"); import builtin_mcp; builtin_mcp.register(sys.exit)" '
+                        "&& openclaw mcp probe tracelattice --json | grep -F tracelattice__sequentialthinking_tools",
+                    ],
                     name=container,
                     remove=True,
                     networks=["none"],

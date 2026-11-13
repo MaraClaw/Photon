@@ -35,8 +35,21 @@ PIN_NAMES = (
     "CLAWSEC_SHA256",
     "HUMANIZER_COMMIT",
     "HUMANIZER_SHA256",
+    "TRACELATTICE_SKILL_COMMIT",
+    "TRACELATTICE_SKILL_SHA256",
+    "TRACELATTICE_VERSION",
+    "TRACELATTICE_SHA256",
 )
-ARCHIVE_PIN_NAMES = ("GOGCLI_SKILLS_COMMIT", "GOGCLI_SKILLS_SHA256", "CLAWSEC_COMMIT", "CLAWSEC_SHA256", "HUMANIZER_COMMIT", "HUMANIZER_SHA256")
+ARCHIVE_PIN_NAMES = (
+    "GOGCLI_SKILLS_COMMIT",
+    "GOGCLI_SKILLS_SHA256",
+    "CLAWSEC_COMMIT",
+    "CLAWSEC_SHA256",
+    "HUMANIZER_COMMIT",
+    "HUMANIZER_SHA256",
+    "TRACELATTICE_SKILL_COMMIT",
+    "TRACELATTICE_SKILL_SHA256",
+)
 CACHE_FLAGS = {"OPENCLAW_BUILD_CACHE_FROM": "--cache-from", "OPENCLAW_BUILD_CACHE_TO": "--cache-to"}
 
 
@@ -297,7 +310,7 @@ def test_openclaw_build_script_forwards_configured_cache_and_still_loads(tmp_pat
 
 def test_environment_example_lists_dockerfile_pin_defaults_as_commented_overrides() -> None:
     # Given
-    pin_names = ("OPENCLAW_VERSION", "OPENCLAW_SHA256", "DEBIAN_SNAPSHOT", "GOGCLI_VERSION", "GOGCLI_AMD64_SHA256", "GOGCLI_ARM64_SHA256", *OFFICECLI_PINS)
+    pin_names = ("OPENCLAW_VERSION", "OPENCLAW_SHA256", "DEBIAN_SNAPSHOT", "GOGCLI_VERSION", "GOGCLI_AMD64_SHA256", "GOGCLI_ARM64_SHA256", *OFFICECLI_PINS, "TRACELATTICE_VERSION", "TRACELATTICE_SHA256")
     lines = ENV_EXAMPLE.read_text(encoding="utf-8").splitlines()
 
     # When
@@ -471,7 +484,8 @@ def test_staged_local_build_passes_one_named_context_with_spaces(tmp_path: Path,
     bin_dir, log_path = install_fake_docker(tmp_path)
     assets = tmp_path / "assets with spaces"
     for name in (f"linux-{architecture}/gogcli.tar.gz", f"linux-{architecture}/officecli",
-                 "common/officecli-SKILL.md", "common/gogcli-skills.tar.gz", "common/soul-guardian.tar.gz", "common/humanizer.tar.gz"):
+                 "common/officecli-SKILL.md", "common/gogcli-skills.tar.gz", "common/soul-guardian.tar.gz", "common/humanizer.tar.gz",
+                 "common/tracelattice-skill.tar.gz"):
         path = assets / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
@@ -501,7 +515,8 @@ def test_staged_local_build_keeps_staged_arguments_with_archive_pins(tmp_path: P
     bin_dir, log_path = install_fake_docker(tmp_path)
     assets = tmp_path / "assets with spaces"
     for name in (f"linux-{architecture}/gogcli.tar.gz", f"linux-{architecture}/officecli",
-                 "common/officecli-SKILL.md", "common/gogcli-skills.tar.gz", "common/soul-guardian.tar.gz", "common/humanizer.tar.gz"):
+                 "common/officecli-SKILL.md", "common/gogcli-skills.tar.gz", "common/soul-guardian.tar.gz", "common/humanizer.tar.gz",
+                 "common/tracelattice-skill.tar.gz"):
         path = assets / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()

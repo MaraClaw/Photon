@@ -17,6 +17,7 @@
 #   OPENCLAW_VERSION, OPENCLAW_SHA256, GOGCLI_VERSION, GOGCLI_{AMD64,ARM64}_SHA256
 #   OFFICECLI_VERSION, OFFICECLI_{AMD64,ARM64,SKILL}_SHA256
 #   GOGCLI_SKILLS_{COMMIT,SHA256}, CLAWSEC_{COMMIT,SHA256}, HUMANIZER_{COMMIT,SHA256}
+#   TRACELATTICE_SKILL_{COMMIT,SHA256}, TRACELATTICE_{VERSION,SHA256}
 #                           optional pins, forwarded only when set and nonempty;
 #                           defaults come from the ARG lines in Dockerfile.openclaw
 #   OPENCLAW_BUILD_CACHE_FROM  optional BuildKit cache to import, passed to --cache-from
@@ -78,7 +79,8 @@ openclaw_collect_pin_args
 
 openclaw_collect_asset_args openclaw-publish \
     linux-amd64/gogcli.tar.gz linux-amd64/officecli linux-arm64/gogcli.tar.gz linux-arm64/officecli \
-    common/officecli-SKILL.md common/gogcli-skills.tar.gz common/soul-guardian.tar.gz common/humanizer.tar.gz
+    common/officecli-SKILL.md common/gogcli-skills.tar.gz common/soul-guardian.tar.gz common/humanizer.tar.gz \
+    common/tracelattice-skill.tar.gz
 
 openclaw_collect_cache_args
 

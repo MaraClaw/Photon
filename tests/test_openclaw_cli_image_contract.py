@@ -11,6 +11,7 @@ ARCHIVE_PIN_OWNERS = {
     "install-gogcli-skills": ("GOGCLI_SKILLS_COMMIT", "GOGCLI_SKILLS_SHA256"),
     "install-soul-guardian": ("CLAWSEC_COMMIT", "CLAWSEC_SHA256"),
     "install-humanizer": ("HUMANIZER_COMMIT", "HUMANIZER_SHA256"),
+    "install-tracelattice-skill": ("TRACELATTICE_SKILL_COMMIT", "TRACELATTICE_SKILL_SHA256"),
 }
 # The RUN that first reads each build argument, in Dockerfile order. A build argument with a
 # value enters the environment of every later RUN, so one declared any earlier than this
@@ -21,6 +22,7 @@ ARGUMENT_READERS = (
     ('tar -xzf "$GOGCLI_ARCHIVE"', ("TARGETOS", "TARGETARCH", "OPENCLAW_ASSET_MODE", "GOGCLI_VERSION", "GOGCLI_AMD64_SHA256", "GOGCLI_ARM64_SHA256")),
     ("sh /tmp/install-officecli.sh", tuple(OFFICECLI_PINS)),
     *((f"sh /tmp/{installer}.sh", names) for installer, names in ARCHIVE_PIN_OWNERS.items()),
+    ("npm ci --prefix /opt/tracelattice", ("TRACELATTICE_VERSION", "TRACELATTICE_SHA256")),
 )
 
 
@@ -51,7 +53,7 @@ def test_each_build_argument_is_declared_once_directly_above_its_first_reader() 
 def test_apt_and_openclaw_install_are_separate_layers_with_their_own_cleanup() -> None:
     runs = [body for instruction, body in _final_stage() if instruction == "RUN"]
     (apt,) = (body for body in runs if "apt-get" in body)
-    (openclaw,) = (body for body in runs if "npm" in body)
+    (openclaw,) = (body for body in runs if "npm ci --prefix /opt/openclaw" in body)
     assert runs.index(apt) < runs.index(openclaw)
     assert "snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}" in apt
     assert apt.endswith("&& rm -rf /var/lib/apt/lists/*")
@@ -104,7 +106,7 @@ def test_archive_pin_arguments_are_final_stage_defaultless_and_not_runtime_env()
         if instruction == "ENV":
             runtime_env.update(token.partition("=")[0] for token in shlex.split(body))
         if instruction == "RUN":
-            for installer in ("install-gogcli-skills", "install-soul-guardian", "install-humanizer"):
+            for installer in ARCHIVE_PIN_OWNERS:
                 if f"sh /tmp/{installer}.sh" in body:
                     installer_args[installer] = stage_args.copy()
     assert stage_count == 4
@@ -126,13 +128,14 @@ def test_image_installs_pinned_cli_and_runs_validator_as_entrypoint() -> None:
     assert json.loads(entrypoint.removeprefix("ENTRYPOINT ")) == [
         "tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh",
         "/usr/local/bin/validate-officecli.sh", "/usr/local/bin/validate-soul-guardian.sh",
-        "/usr/local/bin/validate-tavily.sh", "/usr/local/bin/validate-humanizer.sh", "/usr/local/bin/bootstrap-agent-container.py",
+        "/usr/local/bin/validate-tavily.sh", "/usr/local/bin/validate-humanizer.sh",
+        "/usr/local/bin/validate-tracelattice.sh", "/usr/local/bin/bootstrap-agent-container.py",
     ]
     assert json.loads(command.removeprefix("CMD ")) == ["openclaw", "gateway"]
     assert "COPY docker/openclaw/install-officecli.sh /tmp/install-officecli.sh" in lines
     assert "online) sh /tmp/install-officecli.sh ;;" in source
     assert 'staged) sh /tmp/install-officecli.sh --binary-file "/staged/linux-${TARGETARCH}/officecli" --skill-file /staged/common/officecli-SKILL.md ;;' in source
-    for name in ("gogcli", "officecli", "soul-guardian", "tavily", "humanizer"):
+    for name in ("gogcli", "officecli", "soul-guardian", "tavily", "humanizer", "tracelattice"):
         assert f"COPY --chmod=0755 docker/openclaw/validate-{name}.sh /usr/local/bin/validate-{name}.sh" in lines
         assert f"!docker/openclaw/validate-{name}.sh" in (DOCKERFILE.parent / ".dockerignore").read_text().splitlines()
     assert not [line for line in lines if line.startswith("RUN chmod")]
@@ -161,7 +164,7 @@ def test_image_installs_pinned_cli_and_runs_validator_as_entrypoint() -> None:
 def test_shared_installer_helper_spans_the_installers_and_is_whitelisted() -> None:
     lines = DOCKERFILE.read_text().splitlines()
     helper_copy = lines.index("COPY docker/openclaw/install-common.sh /tmp/install-common.sh")
-    installers = ("officecli", "gogcli-skills", "soul-guardian", "humanizer", "tavily")
+    installers = ("officecli", "gogcli-skills", "soul-guardian", "humanizer", "tracelattice-skill", "tavily")
     first = lines.index("COPY docker/openclaw/install-officecli.sh /tmp/install-officecli.sh")
     last_run = lines.index("RUN sh /tmp/install-tavily.sh && rm /tmp/install-tavily.sh /tmp/install-common.sh")
     assert helper_copy < first < last_run
@@ -175,7 +178,7 @@ def test_shared_installer_helper_spans_the_installers_and_is_whitelisted() -> No
 def test_image_installs_and_includes_probe_helpers() -> None:
     lines = DOCKERFILE.read_text().splitlines()
     allowed = (DOCKERFILE.parent / ".dockerignore").read_text().splitlines()
-    for helper in ("startup-probe.sh", "startup-probe.py", "bootstrap_event.py", "bootstrap-agent-container.py"):
+    for helper in ("startup-probe.sh", "startup-probe.py", "bootstrap_event.py", "builtin_mcp.py", "bootstrap-agent-container.py"):
         assert f"COPY --chmod=0755 docker/openclaw/{helper} /usr/local/bin/{helper}" in lines
         assert f"!docker/openclaw/{helper}" in allowed
 
@@ -206,6 +209,8 @@ def test_image_inventory_is_created_after_installers_before_node() -> None:
     assert source.index("RUN sh /tmp/install-tavily.sh") < inventory < source.index("USER node")
     assert source.index("sh /tmp/install-humanizer.sh") < inventory
     assert "!docker/openclaw/install-humanizer.sh" in allowed
+    assert source.index("sh /tmp/install-tracelattice-skill.sh") < inventory
+    assert "!docker/openclaw/install-tracelattice-skill.sh" in allowed
     assert "!docker/openclaw/check-skills.py" in allowed
     check = (
         "COPY docker/openclaw/check-skills.py /tmp/check-skills.py\n"
@@ -221,10 +226,30 @@ def test_staged_assets_are_bind_mounted_and_use_pinned_gog_digest() -> None:
     source = DOCKERFILE.read_text()
     assert "FROM scratch AS openclaw_assets" in source
     assert "ARG OPENCLAW_ASSET_MODE=online" in source
-    assert source.count("--mount=type=bind,from=openclaw_assets,target=/staged") == 5
+    assert source.count("--mount=type=bind,from=openclaw_assets,target=/staged") == 6
     assert 'GOGCLI_ARCHIVE="/staged/linux-${TARGETARCH}/gogcli.tar.gz"' in source
     assert source.index('"${GOGCLI_SHA256#sha256:}" "$GOGCLI_ARCHIVE"') < source.index('tar -xzf "$GOGCLI_ARCHIVE"')
     assert "--archive-file /staged/common/gogcli-skills.tar.gz" in source
     assert "--archive-file /staged/common/soul-guardian.tar.gz" in source
     assert "--archive-file /staged/common/humanizer.tar.gz" in source
+    assert "--archive-file /staged/common/tracelattice-skill.tar.gz" in source
     assert source.count("--ownership-output /usr/local/share/openclaw-integrity/gog-skill-roots.txt") == 2
+
+
+def test_tracelattice_server_is_verified_installed_without_scripts_and_inventoried() -> None:
+    source = DOCKERFILE.read_text()
+    allowed = (DOCKERFILE.parent / ".dockerignore").read_text().splitlines()
+    (install,) = (body for instruction, body in _final_stage() if instruction == "RUN" and "/opt/tracelattice" in body)
+    steps = (
+        "sha256sum -c /tmp/tracelattice.tgz.sha256",
+        "sha512sum -c /tmp/tracelattice.lock.sha512",
+        "npm ci --prefix /opt/tracelattice --install-strategy=shallow --omit=dev --ignore-scripts --no-audit --no-fund --cache /tmp/tracelattice-npm-cache",
+        "rm -rf /tmp/tracelattice-npm-cache",
+    )
+    positions = [install.index(step) for step in steps]
+    assert positions == sorted(positions)
+    assert install.endswith("&& rm -rf /tmp/tracelattice-npm-cache")
+    launcher = "COPY --chmod=0755 docker/openclaw/tracelattice.sh /usr/local/bin/tracelattice\n"
+    assert source.index("npm ci --prefix /opt/tracelattice") < source.index(launcher) < source.index("RUN python3 /usr/local/bin/installed-assets.py create")
+    for name in ("tracelattice.sh", "tracelattice-soul.md", "tracelattice-package/package.json", "tracelattice-package/package-lock.json"):
+        assert f"!docker/openclaw/{name}" in allowed

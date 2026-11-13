@@ -1,12 +1,22 @@
 {
   "name": "openclaw-runtime",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Locked dependency tree for the OpenClaw guest image; see Dockerfile.openclaw.",
   "dependencies": {
     "openclaw": "2026.11.3"
   },
   "allowScripts": {
-    "openclaw": true
+    "openclaw": true,
+    "@google/genai@2.32.0": true,
+    "@google/genai@2.27.0": true,
+    "esbuild@0.28.2": true,
+    "protobufjs@7.6.6": true,
+    "protobufjs@8.8.1": true
+  },
+  "devDependencies": {
+    "@google/genai": "^2.32.0",
+    "esbuild": "^0.28.2",
+    "protobufjs": "^8.8.1"
   }
 }

@@ -9,6 +9,14 @@ from test_openclaw_dockerfile_trixie_pins import DOCKERFILE, REPO_ROOT, _argumen
 PACKAGE_DIR: Final = REPO_ROOT / "docker" / "openclaw" / "openclaw-package"
 EXACT_VERSION: Final = re.compile(r"\d+\.\d+\.\d+")
 REGISTRY: Final = "https://registry.npmjs.org/"
+ALLOWED_SCRIPTS: Final = {
+    "openclaw": True,
+    "@google/genai@2.32.0": True,
+    "@google/genai@2.27.0": True,
+    "esbuild@0.28.2": True,
+    "protobufjs@7.6.6": True,
+    "protobufjs@8.8.1": True,
+}
 
 
 def _load(name: str) -> dict[str, Any]:
@@ -29,8 +37,8 @@ def _lock_errors(package: dict[str, Any], lock: dict[str, Any], openclaw_version
     packages = lock["packages"]
     if package.get("dependencies") != {"openclaw": openclaw_version} or not EXACT_VERSION.fullmatch(openclaw_version):
         errors.append(f"package.json must depend only on openclaw at the exact version {openclaw_version}")
-    if package.get("allowScripts") != {"openclaw": True}:
-        errors.append("allowScripts must approve openclaw and nothing else")
+    if package.get("allowScripts") != ALLOWED_SCRIPTS:
+        errors.append("allowScripts must approve exactly the reviewed install scripts")
     if lock.get("lockfileVersion") != 3:
         errors.append("lockfileVersion must be 3")
     if packages.get("", {}).get("dependencies") != package.get("dependencies"):

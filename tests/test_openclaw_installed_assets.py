@@ -23,7 +23,7 @@ def verify(env: dict[str, str], component: str) -> subprocess.CompletedProcess[s
     return subprocess.run([sys.executable, env["INTEGRITY_HELPER"], "verify", "--component", component, "--inventory-dir", env["INTEGRITY_DIR"]], capture_output=True, text=True, check=False)
 
 
-@pytest.mark.parametrize("component,name", [("gogcli", "crabbox"), ("officecli", "officecli"), ("soul-guardian", "soul-guardian"), ("tavily", "tavily-crawl"), ("humanizer", "humanizer")])
+@pytest.mark.parametrize("component,name", [("gogcli", "crabbox"), ("officecli", "officecli"), ("soul-guardian", "soul-guardian"), ("tavily", "tavily-crawl"), ("humanizer", "humanizer"), ("tracelattice", "tracelattice-skill")])
 @pytest.mark.parametrize("change", ["bytes", "missing", "extra"])
 def test_owned_changes_are_rejected(inventory: tuple[Path, dict[str, str]], component: str, name: str, change: str) -> None:
     skills, env = inventory
@@ -36,6 +36,15 @@ def test_owned_changes_are_rejected(inventory: tuple[Path, dict[str, str]], comp
     else:
         (asset.parent / "extra").write_text("extra\n")
     assert verify(env, component).returncode == 1
+
+
+@pytest.mark.parametrize("key,relative", [("INTEGRITY_PACKAGE_TRACELATTICE", "node_modules/@iworkforces/tracelattice/dist/cli.js"), ("INTEGRITY_BINARY_TRACELATTICE", "")])
+def test_tracelattice_package_and_launcher_changes_are_rejected(inventory: tuple[Path, dict[str, str]], key: str, relative: str) -> None:
+    _, env = inventory
+    path = Path(env[key]) / relative
+    assert verify(env, "tracelattice").returncode == 0
+    path.write_text("valid-looking replacement\n")
+    assert verify(env, "tracelattice").returncode == 1
 
 
 def test_symlink_targets_are_recorded_without_following(inventory: tuple[Path, dict[str, str]], tmp_path: Path) -> None:
