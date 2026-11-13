@@ -13,7 +13,7 @@ import tempfile
 import threading
 
 
-VALIDATORS = ("gogcli", "officecli", "soul-guardian", "tavily", "humanizer")
+VALIDATORS = ("gogcli", "officecli", "soul-guardian", "tavily", "humanizer", "tracelattice")
 SOURCE = Path("/usr/local/bin")
 INVENTORY_STEP = "def verify(component: str, inventory_dir: Path, skills_root: Path | None) -> None:\n"
 
@@ -172,7 +172,7 @@ def direct_handoff(script: Path, env: dict[str, str]) -> None:
 
 
 def interpreter_launches(directory: Path) -> None:
-    """The installed chain, with no keyring file, starts python3 six times: a supervisor per validator and one help probe."""
+    """The installed chain, with no keyring file, starts python3 seven times: a supervisor per validator and one help probe."""
     recorder_dir = directory / "recorder"
     recorder_dir.mkdir()
     log = directory / "python3-launches"
@@ -183,7 +183,7 @@ def interpreter_launches(directory: Path) -> None:
     env.pop("GOG_KEYRING_PASSWORD_FILE", None)
     subprocess.run([*(str(SOURCE / f"validate-{name}.sh") for name in VALIDATORS), "true"], env=env, timeout=600, check=True)
     launches = [Path(line).name for line in log.read_text().splitlines()]
-    expected = ["startup-probe.py", "startup-probe.py", "startup-probe.py", "soul_guardian.py", "startup-probe.py", "startup-probe.py"]
+    expected = ["startup-probe.py", "startup-probe.py", "startup-probe.py", "soul_guardian.py", "startup-probe.py", "startup-probe.py", "startup-probe.py"]
     assert launches == expected, launches
     print(f"default validator chain started python3 {len(launches)} times", flush=True)
 
