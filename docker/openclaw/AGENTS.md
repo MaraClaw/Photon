@@ -15,7 +15,7 @@ USER: node
 | `install-officecli.sh` | image build | Download pinned target binary and skill, verify both SHA256 digests, and install them into the image |
 | `install-tavily.sh` | image build | Install the bundled Tavily skills offline into the OpenClaw skills directory |
 | `install-humanizer.sh` | image build | Install the pinned Humanizer skill and upstream license from an online or staged archive |
-| `install-tracelattice-skill.sh` | image build | Install the pinned `tracelattice-skill` skill and upstream license from an online or staged archive |
+| `install-tracelattice-skill.sh` | image build | Install the pinned `tracelattice-skill` skill, its two references and the upstream license from an online or staged archive |
 | `tracelattice.sh` | image build, MCP child | Installed as `/usr/local/bin/tracelattice`; runs the TraceLattice package in `/opt/tracelattice` with Node and forces the `stdio` transport |
 | `check-skills.py` | image build | Check Tavily `SKILL.md` frontmatter/metadata and soul-guardian `skill.json`/`onboard_state_dir.py` before the integrity inventory is created |
 | `validate-gogcli.sh` | entrypoint | Verify gog, optionally load `GOG_KEYRING_PASSWORD_FILE`, and exec the supplied command unchanged |
