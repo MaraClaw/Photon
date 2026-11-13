@@ -5,7 +5,7 @@ Guest **OpenClaw agent image** helpers. Image contract also lives in repo-root `
 ## Chain
 
 ```
-tini -s -- validate-gogcli.sh validate-officecli.sh validate-soul-guardian.sh validate-tavily.sh validate-humanizer.sh bootstrap-agent-container.py openclaw gateway
+tini -s -- validate-gogcli.sh validate-officecli.sh validate-soul-guardian.sh validate-tavily.sh validate-humanizer.sh validate-tracelattice.sh bootstrap-agent-container.py openclaw gateway
 USER: node
 ```
 
@@ -15,13 +15,17 @@ USER: node
 | `install-officecli.sh` | image build | Download pinned target binary and skill, verify both SHA256 digests, and install them into the image |
 | `install-tavily.sh` | image build | Install the bundled Tavily skills offline into the OpenClaw skills directory |
 | `install-humanizer.sh` | image build | Install the pinned Humanizer skill and upstream license from an online or staged archive |
+| `install-tracelattice-skill.sh` | image build | Install the pinned `tracelattice-skill` skill and upstream license from an online or staged archive |
+| `tracelattice.sh` | image build, MCP child | Installed as `/usr/local/bin/tracelattice`; runs the TraceLattice package in `/opt/tracelattice` with Node and forces the `stdio` transport |
 | `check-skills.py` | image build | Check Tavily `SKILL.md` frontmatter/metadata and soul-guardian `skill.json`/`onboard_state_dir.py` before the integrity inventory is created |
 | `validate-gogcli.sh` | entrypoint | Verify gog, optionally load `GOG_KEYRING_PASSWORD_FILE`, and exec the supplied command unchanged |
 | `validate-officecli.sh` | entrypoint | Verify OfficeCLI and exec the supplied command unchanged |
 | `validate-soul-guardian.sh` | entrypoint | Verify the skill inventory and files and the non-mutating help probe, then exec the supplied command unchanged |
 | `validate-tavily.sh` | entrypoint | Verify the two bundled Tavily skills' inventory, files and references offline, then exec the supplied command unchanged |
 | `validate-humanizer.sh` | entrypoint | Verify the Humanizer skill offline, then exec the supplied command unchanged |
-| `bootstrap-agent-container.py` | entrypoint (last), `docker exec` | Publish and enforce `AgentBootstrapCompleted` (see below); imports `bootstrap_event.py`, which owns the guest identity and the event file |
+| `validate-tracelattice.sh` | entrypoint | Verify the TraceLattice launcher, package tree and skill offline without starting the server, then exec the supplied command unchanged |
+| `bootstrap-agent-container.py` | entrypoint (last), `docker exec` | Publish and enforce `AgentBootstrapCompleted` (see below); imports `bootstrap_event.py`, which owns the guest identity and the event file, and `builtin_mcp.py` |
+| `builtin_mcp.py` | gateway start | Add the built-in `mcp.servers` entries that are absent from the active `openclaw.json` (see below); never raises |
 
 ## Startup probes
 
@@ -29,11 +33,19 @@ Each validator sources `startup-probe.sh` and calls `probe_verify COMPONENT INVE
 
 ## Bootstrap event
 
-`bootstrap-agent-container.py` runs after all five validators. Any command except the long-running `openclaw gateway [run] [--options]` (so also `openclaw gateway status`) is exec'd unchanged and emits nothing. For the gateway it launches one child, waits for the real loopback `/readyz` (port from `--port`, else `OPENCLAW_GATEWAY_PORT`, else 18789, as OpenClaw itself resolves it, so set the env var if `gateway.port` in `openclaw.json` differs; budget `OPENCLAW_BOOTSTRAP_TIMEOUT_SECONDS`, default 120), confirms the child is still alive, then atomically publishes `/tmp/maraclaw-bootstrap/AgentBootstrapCompleted.json`: `{"version":1,"event":"AgentBootstrapCompleted","boot_id":<kernel boot id>,"pid1_start_ticks":"<PID 1 /proc stat field 22>"}`. It then relays signals and exits with the child's status. Early exit, timeout (124) or HUP/INT/QUIT/TERM before readiness publish nothing and leave no child.
+`bootstrap-agent-container.py` runs after all six validators. Any command except the long-running `openclaw gateway [run] [--options]` (so also `openclaw gateway status`) is exec'd unchanged, emits nothing and leaves `openclaw.json` alone. For the gateway it validates the policy and identity, calls `builtin_mcp.register()` (next section), launches one child, waits for the real loopback `/readyz` (port from `--port`, else `OPENCLAW_GATEWAY_PORT`, else 18789, as OpenClaw itself resolves it, so set the env var if `gateway.port` in `openclaw.json` differs; budget `OPENCLAW_BOOTSTRAP_TIMEOUT_SECONDS`, default 120), confirms the child is still alive, then atomically publishes `/tmp/maraclaw-bootstrap/AgentBootstrapCompleted.json`: `{"version":1,"event":"AgentBootstrapCompleted","boot_id":<kernel boot id>,"pid1_start_ticks":"<PID 1 /proc stat field 22>"}`. It then relays signals and exits with the child's status. Early exit, timeout (124) or HUP/INT/QUIT/TERM before readiness publish nothing and leave no child.
 
 The event is valid only while both identity values match the running guest, so a file left by an earlier boot or container start never authorizes this one; removal is hygiene, not the guard. `check-ready` validates the event and then probes `/readyz` (0 ready, 1 not ready); `exec -- ACTION...` validates it and then execs the action. Both exit 75 while bootstrap is pending (missing, malformed, unsupported or mismatched event) and nothing is cached.
 
 The engine and the image are a matched pair: an image built without this helper never emits the event, and there is no fallback for it.
+
+## Built-in MCP server
+
+`builtin_mcp.register()` runs once per gateway start, before the gateway process exists, so OpenClaw reads the entry on its first config load. It resolves the config as OpenClaw does (`OPENCLAW_CONFIG_PATH`, else `$OPENCLAW_STATE_DIR/openclaw.json`, else `${OPENCLAW_HOME:-$HOME}/.openclaw/openclaw.json`) and adds `mcp.servers.tracelattice = {"command": "/usr/local/bin/tracelattice", "transport": "stdio"}` only when that name is absent. An existing entry is never changed: `"enabled": false` is the opt-out, and a deleted entry comes back at the next start. The engine keeps guest `mcp.servers` entries when it regenerates the file.
+
+The write is a same-directory temp file renamed over the original, with the mode kept, and it happens only for a regular file owned by the current user that parses as strict JSON with object-valued `mcp` and `mcp.servers`. The helper re-stats the file before the rename and gives up if it changed. A missing config stays missing; every other case is one stderr report and the gateway starts anyway. The image does not use `openclaw mcp set`, which takes about two seconds and also stamps `meta` and writes backup and state files.
+
+OpenClaw names MCP tools `serverName__toolName`, so the agent calls `tracelattice__sequentialthinking_tools`; the server itself and the upstream skill call the tool `sequentialthinking_tools`. `tracelattice-soul.md` names only the skill; the skill body covers the tool and notes that a client may show it with a server prefix. Each agent session that uses the tool keeps one Node child.
 
 ## Pins
 
@@ -46,6 +58,7 @@ Runtime skill selection policy belongs in the `*-soul.md` fragments. The Dockerf
 - Soul Guardian is baked into the image; startup validates it without initializing state or enabling monitoring.
 - Tavily skills are installed from `tavily-skills/` at build time; startup validates them offline without credentials.
 - Humanizer is installed at build time with installer-owned archive pins; startup validates it offline.
+- TraceLattice lives in `/opt/tracelattice`, installed by `npm ci --ignore-scripts` from `tracelattice-package/package-lock.json` after its archive is checked against `TRACELATTICE_SHA256` and the lock integrity. Its `dist/cli.js` has a `bun` shebang and the image has no bun, so the launcher runs it with `node`. The skill comes from the release commit archive with installer-owned pins (`TRACELATTICE_SKILL_COMMIT`, `TRACELATTICE_SKILL_SHA256`); bump the npm pins and the skill pins together.
 - OpenClaw lives in `/opt/openclaw/node_modules/openclaw` (not the global npm root), installed by `npm ci` from `openclaw-package/package-lock.json` after its archive is checked against `OPENCLAW_SHA256` and the lock integrity, without local memory-provider patches. Only OpenClaw's own install scripts run, approved through `allowScripts` in that `package.json`.
 - After `npm ci`, `patch-cron-maintenance.py` requires OpenClaw 2026.11.3 and the exact SHA256 preimage of `dist/maintenance-CT4-WlcF.mjs`, then binds only maintenance `scope.schedule` to its lifecycle async context before event subscribers can schedule from a temporary prep scope. Drift or repeat application fails the build before writing. Remove the helper, build invocation, and context whitelist when upstream fixes this lifecycle context bug.
 - Apt resolves from `snapshot.debian.org` at the `DEBIAN_SNAPSHOT` ARG; a pin bump may need a newer snapshot.
@@ -57,4 +70,4 @@ Runtime skill selection policy belongs in the `*-soul.md` fragments. The Dockerf
 
 - Do not put `GOG_KEYRING_PASSWORD` in Docker env/args; file path only. `validate-gogcli.sh` exports it from that file, so the gateway and its children inherit it (the engine smoke tests assert this).
 - Image tests live in Photon `tests/`; gogcli product docs and routing tests remain in MaraClaw engine.
-- Guest LLM is whatever `openclaw.json` names. Engine writes primary + registered secondary/fallback at container start, then `openclaw_routing` rewrites the selected primary per queued turn. The gateway watches that file (hot reload). Do not add a second classifier inside the image.
+- Guest LLM is whatever `openclaw.json` names. Engine writes primary + registered secondary/fallback at container start, then `openclaw_routing` rewrites the selected primary per queued turn. The gateway watches that file (hot reload). Do not add a second classifier inside the image. The only image write to that file is the absent-only `mcp.servers` registration above; do not widen it to other keys.
