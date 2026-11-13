@@ -9,7 +9,8 @@ from typing import Final
 import pytest
 
 INSTALLER: Final = Path(__file__).resolve().parents[1] / "docker/openclaw/install-tracelattice-skill.sh"
-COMMIT: Final = "8357477bdc01abb0338af1a69482d3a79a0946ef"
+COMMIT: Final = "3c4c16fc2af4ccb265ce4d74b933745925bc2b40"
+REFERENCES: Final = ("references/errors.md", "references/tool-calls.md")
 
 
 @pytest.fixture
@@ -18,6 +19,10 @@ def installation(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     skill = source / "skills/tracelattice-skill"
     skill.mkdir(parents=True)
     (skill / "SKILL.md").write_bytes(b"fixture skill\n")
+    (skill / "references").mkdir()
+    for reference in REFERENCES:
+        (skill / reference).write_bytes(f"fixture {reference}\n".encode())
+    (skill / "references/extra.md").write_bytes(b"not installed\n")
     (source / "LICENSE").write_bytes(b"fixture license\n")
     (source / "extra").write_bytes(b"not installed\n")
     (skill / "extra").write_bytes(b"not installed\n")
@@ -47,13 +52,14 @@ def run_install(env: dict[str, str], *args: str) -> subprocess.CompletedProcess[
 @pytest.mark.parametrize("local", [True, False])
 def test_installs_only_required_files_and_reruns(installation: tuple[Path, dict[str, str]], local: bool) -> None:
     source, env = installation
-    origins = {"SKILL.md": source / "skills/tracelattice-skill/SKILL.md", "LICENSE": source / "LICENSE"}
+    skill = source / "skills/tracelattice-skill"
+    origins = {"SKILL.md": skill / "SKILL.md", "LICENSE": source / "LICENSE"} | {reference: skill / reference for reference in REFERENCES}
     args = ("--archive-file", env["ARCHIVE"]) if local else ()
     for _ in range(2):
         result = run_install(env, *args)
         assert result.returncode == 0, result.stderr
     target = Path(env["HOME"]) / ".openclaw/skills/tracelattice-skill"
-    assert {p.name for p in target.iterdir()} == {"SKILL.md", "LICENSE"}
+    assert {p.relative_to(target).as_posix() for p in target.rglob("*")} == {"SKILL.md", "LICENSE", "references", *REFERENCES}
     for asset, origin in origins.items():
         assert (target / asset).read_bytes() == origin.read_bytes()
         assert (target / asset).stat().st_mode & 0o444 == 0o444
@@ -68,14 +74,14 @@ def test_installs_only_required_files_and_reruns(installation: tuple[Path, dict[
     assert not list(Path(env["TMPDIR"]).iterdir())
 
 
-@pytest.mark.parametrize("bad", ["digest", "missing-skill", "missing-license", "empty-skill", "empty-license", "commit"])
+@pytest.mark.parametrize("bad", ["digest", "missing-skill", "missing-license", "missing-reference", "empty-skill", "empty-license", "empty-reference", "commit"])
 def test_bad_input_preserves_existing_install(installation: tuple[Path, dict[str, str]], bad: str) -> None:
     source, env = installation
     target = Path(env["HOME"]) / ".openclaw/skills/tracelattice-skill"
     target.mkdir(parents=True)
     (target / "old").write_bytes(b"old")
     if bad.startswith(("missing-", "empty-")):
-        asset = source / ("skills/tracelattice-skill/SKILL.md" if bad.endswith("skill") else "LICENSE")
+        asset = source / {"skill": "skills/tracelattice-skill/SKILL.md", "license": "LICENSE", "reference": f"skills/tracelattice-skill/{REFERENCES[1]}"}[bad.split("-")[1]]
         if bad.startswith("missing-"):
             asset.unlink()
         else:

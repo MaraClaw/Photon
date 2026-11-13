@@ -4,6 +4,6 @@
   "private": true,
   "description": "Locked dependency tree for the TraceLattice MCP server in the OpenClaw guest image; see Dockerfile.openclaw.",
   "dependencies": {
-    "@iworkforces/tracelattice": "2.4.5"
+    "@iworkforces/tracelattice": "2.4.6"
   }
 }

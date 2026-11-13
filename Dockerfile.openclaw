@@ -156,8 +156,8 @@ RUN template="/opt/openclaw/node_modules/openclaw/docs/reference/templates/SOUL.
 COPY docker/openclaw/tavily-skills/ /tmp/tavily-skills/
 COPY docker/openclaw/install-tavily.sh /tmp/install-tavily.sh
 RUN sh /tmp/install-tavily.sh && rm /tmp/install-tavily.sh /tmp/install-common.sh
-ARG TRACELATTICE_VERSION=2.4.5
-ARG TRACELATTICE_SHA256=sha256:493ea40faacc34821b006c5774f7cce0cb7247ed63e694b02bb0a80495696666
+ARG TRACELATTICE_VERSION=2.4.6
+ARG TRACELATTICE_SHA256=sha256:ca5d64c85a18f0eaeca07b18f5f5faa3501d541f8e001b4011b28e5cc6cc0511
 RUN --mount=type=bind,source=docker/openclaw/tracelattice-package,target=/tmp/tracelattice-package \
     install -D -m 0644 -t /opt/tracelattice /tmp/tracelattice-package/package.json /tmp/tracelattice-package/package-lock.json \
     && LOCKED_VERSION=$(node -p 'require("/opt/tracelattice/package-lock.json").packages["node_modules/@iworkforces/tracelattice"].version') \
