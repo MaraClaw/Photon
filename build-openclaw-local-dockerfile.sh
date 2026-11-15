@@ -3,11 +3,11 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: ./build-openclaw-local-dockerfile.sh [-h|--help]
+Usage: ./build-openclaw-local-dockerfile.sh [MARACLAW_OPENCLAW_IMAGE] | -h | --help
 
 Build and load one local OpenClaw image. Environment settings:
   DOCKER_PLATFORM              linux/arm64 (default) or linux/amd64
-  MARACLAW_OPENCLAW_IMAGE      image name and tag (default: openclaw:local)
+  MARACLAW_OPENCLAW_IMAGE      image name and tag; overrides the positional argument
   ENV_FILE                     env file to source (default: .env)
   OPENCLAW_ASSET_MODE          online (default) or staged
   OPENCLAW_ASSET_DIR           asset directory required in staged mode
@@ -28,6 +28,8 @@ Build and load one local OpenClaw image. Environment settings:
 
 The selected env file is sourced from the script directory if it exists;
 its assignments override inherited environment values. Empty values use defaults.
+A nonempty MARACLAW_OPENCLAW_IMAGE after sourcing overrides the positional image
+name; otherwise the positional argument is used, then openclaw:local if empty or absent.
 Every pin is forwarded as a build argument only when set and nonempty; unset pins
 use the ARG defaults in Dockerfile.openclaw.
 Cache flags are passed only when their setting is nonempty, for example
@@ -35,17 +37,18 @@ OPENCLAW_BUILD_CACHE_FROM=type=local,src=/path/to/cache; exporting a cache needs
 builder whose driver supports it (the default docker driver may not).
 The target architecture is prepended literally to the image name:
   ./build-openclaw-local-dockerfile.sh  -> arm64-openclaw:local
+  ./build-openclaw-local-dockerfile.sh openclaw:custom  -> arm64-openclaw:custom
   DOCKER_PLATFORM=linux/amd64 MARACLAW_OPENCLAW_IMAGE=workspace/openclaw:custom \
     ./build-openclaw-local-dockerfile.sh  -> amd64-workspace/openclaw:custom
 Examples assume the selected env file does not override those settings.
 EOF
 }
 
-if [ "$#" -gt 0 ]; then
-    if [ "$#" -eq 1 ] && { [ "$1" = --help ] || [ "$1" = -h ]; }; then
-        usage
-        exit 0
-    fi
+if [ "$#" -eq 1 ] && { [ "$1" = --help ] || [ "$1" = -h ]; }; then
+    usage
+    exit 0
+fi
+if [ "$#" -gt 1 ] || [[ "${1:-}" == -* ]]; then
     echo '[openclaw-build] Unknown arguments' >&2
     usage >&2
     exit 2
@@ -69,7 +72,7 @@ case "$DOCKER_PLATFORM" in
         ;;
 esac
 
-LOCAL_IMAGE="${DOCKER_PLATFORM#linux/}-${MARACLAW_OPENCLAW_IMAGE:-openclaw:local}"
+LOCAL_IMAGE="${DOCKER_PLATFORM#linux/}-${MARACLAW_OPENCLAW_IMAGE:-${1:-openclaw:local}}"
 
 openclaw_collect_pin_args
 

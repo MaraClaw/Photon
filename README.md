@@ -34,10 +34,10 @@ The last entrypoint stage, `bootstrap-agent-container.py`, registers the built-i
 
 Copy `.env.example` to `.env` if you want project-local configuration. Both scripts change to the Photon directory and source `.env` by default; assignments in that file override inherited environment variables. Set `ENV_FILE` to an explicit path to source a different file, or to a nonexistent path to use only the process environment. Pin defaults live only in the `Dockerfile.openclaw` ARGs; the scripts forward a pin as a build argument only when it is set and nonempty, so `.env.example` lists them commented out as overrides.
 
-The local build loads one target (default `linux/arm64`) and defaults to `openclaw:local`. Its tag must match the engine's `MARACLAW_OPENCLAW_IMAGE` and it must be loaded on the same Docker daemon used by the worker. For example, with no overriding assignment in the selected env file:
+The local build loads one target (default `linux/arm64`) and accepts an optional positional image name. A nonempty `MARACLAW_OPENCLAW_IMAGE` after env-file sourcing overrides that argument; an empty or unset value falls back to the argument, then `openclaw:local` if the argument is empty or absent. The target architecture is prepended literally to the selected image name, so the example below builds `arm64-openclaw:custom` when neither the process environment nor the selected env file overrides the image. The resulting tag must match the engine's `MARACLAW_OPENCLAW_IMAGE` and be loaded on the same Docker daemon used by the worker:
 
 ```bash
-MARACLAW_OPENCLAW_IMAGE=openclaw:2026.11.5-beta.3 ./build-openclaw-local-dockerfile.sh
+./build-openclaw-local-dockerfile.sh openclaw:custom
 ```
 
 Set `DOCKER_PLATFORM=linux/amd64` for the other supported target. If you override a pin, override its paired version and checksum together.
