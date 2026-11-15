@@ -95,9 +95,9 @@ ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
 
 COPY docker/openclaw/install-common.sh /tmp/install-common.sh
 COPY docker/openclaw/install-officecli.sh /tmp/install-officecli.sh
-ARG OFFICECLI_VERSION=v1.0.160
-ARG OFFICECLI_ARM64_SHA256=e8f06aff6c59f11a73a1a1218bda3ce170299201fd56bce6d62ecd4d0c024e53
-ARG OFFICECLI_AMD64_SHA256=baa084b64ec634bd9d41a0592db3ed85f11658b358bab898679537ea7f3e73a9
+ARG OFFICECLI_VERSION=v1.0.161
+ARG OFFICECLI_ARM64_SHA256=3ff44a8f527e4805c0db7abfea8da68b2353f8b1d83e1099d7cae27fc140f95a
+ARG OFFICECLI_AMD64_SHA256=ed551216f7a62c562d8d231c0416374566684fcc6163176f2ba4ad721c62900a
 ARG OFFICECLI_SKILL_SHA256=c950d285ce60021712b4753fb2d9f592308d5622bab776229061dfecb1ce55d4
 RUN --mount=type=bind,from=openclaw_assets,target=/staged \
     case "$OPENCLAW_ASSET_MODE" in \

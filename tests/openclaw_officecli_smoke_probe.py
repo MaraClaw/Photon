@@ -47,7 +47,7 @@ test "$OFFICECLI_NO_AUTO_RESIDENT" = 1
 test -f "$HOME/.openclaw/skills/officecli/SKILL.md"
 test -f "$HOME/.openclaw/skills/gog/SKILL.md"
 officecli_version="$(officecli --version)"
-printf '%s\n' "$officecli_version" | grep -Eq '(^|[^0-9])v?1\\.0\\.160([^0-9]|$)'
+printf '%s\n' "$officecli_version" | grep -Eq '(^|[^0-9])v?1\\.0\\.161([^0-9]|$)'
 printf 'executed %s\n' "$officecli_version"
 officecli --help > /tmp/officecli-help.txt
 test -s /tmp/officecli-help.txt
