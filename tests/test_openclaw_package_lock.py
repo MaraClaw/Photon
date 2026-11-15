@@ -4,10 +4,17 @@ import re
 from pathlib import Path
 from typing import Any, Final
 
+import pytest
+
 from test_openclaw_dockerfile_trixie_pins import DOCKERFILE, REPO_ROOT, _argument_values
 
 PACKAGE_DIR: Final = REPO_ROOT / "docker" / "openclaw" / "openclaw-package"
-EXACT_VERSION: Final = re.compile(r"\d+\.\d+\.\d+")
+EXACT_VERSION: Final = re.compile(
+    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+    r"(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+)
 REGISTRY: Final = "https://registry.npmjs.org/"
 ALLOWED_SCRIPTS: Final = {
     "openclaw": True,
@@ -104,3 +111,35 @@ def test_lock_contract_rejects_version_drift_and_unverifiable_packages() -> None
     assert any("npm registry" in error for error in _lock_errors(package, git_source, version))
     assert any("allowScripts" in error for error in _lock_errors(broad_scripts, lock, version))
     assert any("exact version" in error for error in _lock_errors(package, lock, "9.9.9"))
+
+
+@pytest.mark.parametrize(("version", "accepted"), [
+    ("2026.11.3", True),
+    ("2026.11.5-beta.3", True),
+    ("1.2.3-rc.0+build.17", True),
+    ("^2026.11.5-beta.3", False),
+    ("~2026.11.5-beta.3", False),
+    (">=2026.11.5-beta.3", False),
+    ("2026.11.3 || 2026.11.5-beta.3", False),
+    ("2026.11.x", False),
+    ("beta", False),
+    ("v2026.11.5-beta.3", False),
+    ("2026.11.5-beta.03", False),
+    ("2026.11.5-beta..3", False),
+    ("02026.11.5-beta.3", False),
+    ("2026.11.5-beta.3\n", False),
+])
+def test_lock_contract_accepts_only_exact_semver_pins(version: str, accepted: bool) -> None:
+    # Given matching versions so only the pin syntax can reject the package.
+    package, lock = _load("package.json"), _load("package-lock.json")
+    package["dependencies"]["openclaw"] = version
+    lock["packages"][""]["dependencies"]["openclaw"] = version
+    lock["packages"]["node_modules/openclaw"]["version"] = version
+
+    # When
+    errors = _lock_errors(package, lock, version)
+
+    # Then
+    assert (errors == ()) is accepted
+    if not accepted:
+        assert any("exact version" in error for error in errors)
