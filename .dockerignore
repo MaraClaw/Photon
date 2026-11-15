@@ -3,6 +3,7 @@
 !docker/
 !docker/openclaw/
 !docker/openclaw/install-common.sh
+!docker/openclaw/patch-mcp-reconnect.py
 !docker/openclaw/install-officecli.sh
 !docker/openclaw/install-gogcli-skills.sh
 !docker/openclaw/install-soul-guardian.sh
