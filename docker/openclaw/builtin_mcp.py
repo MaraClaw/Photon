@@ -1,9 +1,9 @@
 """Built-in MCP servers of the image, registered in the active OpenClaw config right before the gateway starts.
 
 OpenClaw reads MCP servers only from mcp.servers of the active config. The engine writes that file as strict JSON (json.dumps,
-indent 2) and keeps guest-written mcp.servers entries, so a missing built-in server is added in place and anything already
-there, enabled or not, is the guest's choice and stays as it is. Registration never blocks the gateway: a config that cannot be
-updated safely is reported and left untouched.
+indent 2) and keeps guest-written mcp.servers entries. Missing built-in servers are added with enabled true; existing objects
+gain only a missing enabled flag, preserving explicit choices and all custom settings. Registration never blocks the gateway:
+a config that cannot be updated safely is reported and left untouched.
 """
 
 import json
@@ -16,7 +16,7 @@ from typing import Final, NoReturn
 
 type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
 
-SERVERS: Final[dict[str, dict[str, str]]] = {"tracelattice": {"command": "/usr/local/bin/tracelattice", "transport": "stdio"}}
+SERVERS: Final[dict[str, dict[str, str | bool]]] = {"tracelattice": {"command": "/usr/local/bin/tracelattice", "transport": "stdio", "enabled": True}}
 CONFIG_NAME: Final = "openclaw.json"
 TEMP_PREFIX: Final = f".{CONFIG_NAME}."
 
@@ -64,11 +64,17 @@ def object_at(parent: dict[str, JsonValue], key: str, label: str) -> dict[str, J
 
 
 def add_missing_servers(document: dict[str, JsonValue]) -> bool:
-    """Add the absent built-in servers in place, keeping every other key and the key order; False when none was absent."""
+    """Add absent built-in servers and missing enabled flags in place; False when nothing changed."""
     mcp = object_at(document, "mcp", "mcp")
     servers = object_at(mcp, "servers", "mcp.servers")
     missing: dict[str, JsonValue] = {name: {**server} for name, server in SERVERS.items() if name not in servers}
-    if not missing:
+    changed = bool(missing)
+    for name in SERVERS:
+        existing = servers.get(name)
+        if isinstance(existing, dict) and "enabled" not in existing:
+            existing["enabled"] = True
+            changed = True
+    if not changed:
         return False
     servers.update(missing)
     mcp["servers"] = servers

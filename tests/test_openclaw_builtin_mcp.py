@@ -84,6 +84,7 @@ def test_adds_tracelattice_to_engine_config(config: Path, mode: int) -> None:
     assert run() == []
     result = json.loads(config.read_bytes())
     assert result == ENGINE | {"mcp": {"servers": {"tracelattice": TRACELATTICE}}}
+    assert result["mcp"]["servers"]["tracelattice"]["enabled"] is True
     assert list(result) == [*ENGINE, "mcp"]
     assert config.read_bytes() == json.dumps(result, indent=2).encode()
     assert stat.S_IMODE(config.stat().st_mode) == mode
@@ -107,7 +108,27 @@ def test_other_servers_and_mcp_keys_are_kept(config: Path) -> None:
     assert list(result["mcp"]["servers"]) == ["docs", "local"]
 
 
-@pytest.mark.parametrize("entry", [{"enabled": False, "command": "x"}, {"command": "other"}, None])
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {},
+        {"command": "other"},
+        {"command": "custom", "args": ["--flag", "value"], "env": {"CUSTOM": "kept"}, "transport": "custom", "timeout": 42, "custom": {"option": "kept"}},
+    ],
+)
+def test_existing_tracelattice_object_without_enabled_is_migrated(config: Path, entry: dict[str, str | int | list[str] | dict[str, str]]) -> None:
+    other = {"docs": {"url": "https://example.test/mcp"}}
+    original = ENGINE | {"mcp": {"sessionIdleTtlMs": 5, "servers": other | {"tracelattice": entry}}}
+    put(config, original)
+
+    assert run() == []
+
+    assert json.loads(config.read_bytes()) == ENGINE | {"mcp": {"sessionIdleTtlMs": 5, "servers": other | {"tracelattice": entry | {"enabled": True}}}}
+    assert stat.S_IMODE(config.stat().st_mode) == 0o600
+    assert names(config.parent) == ["openclaw.json"]
+
+
+@pytest.mark.parametrize("entry", [{"enabled": False, "command": "x", "env": {"CUSTOM": "kept"}}, {"enabled": True, "command": "other"}, {"enabled": None}, None, [], "custom"])
 def test_existing_tracelattice_entry_is_left_alone(config: Path, entry: object) -> None:
     config.write_text(json.dumps({"mcp": {"servers": {"tracelattice": entry}}}) + "\n")
     config.chmod(0o600)
