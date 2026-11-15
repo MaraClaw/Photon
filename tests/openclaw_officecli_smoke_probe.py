@@ -35,7 +35,7 @@ printf 'executed node=%s arch=%s kernel=%s\n' "$(node --version)" "$(node -p 'pr
 gog --version | grep '0.48.0'
 gog --help > /tmp/gog-smoke-help.txt
 test -s /tmp/gog-smoke-help.txt
-openclaw --version | grep '2026.11.3'
+openclaw --version | grep -F '2026.11.5-beta.3'
 """
 
 PROBE: Final = (

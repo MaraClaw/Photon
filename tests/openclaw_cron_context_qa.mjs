@@ -22,15 +22,15 @@ const cronStorePath = join(process.env.OPENCLAW_STATE_DIR, "cron", "jobs.json");
 writeFileSync(cronStorePath, JSON.stringify({ version: 1, jobs: [] }));
 
 const dist = "/opt/openclaw/node_modules/openclaw/dist/";
-const admission = await import(`${dist}agent-database-admission-CeDA0ojh.mjs`);
-const { t: GatewayScheduler } = await import(`${dist}gateway-scheduler-DzQtXKjV.mjs`);
-const { a: sessionChanges } = await import(`${dist}session-row-changes-vFaNnKNM.mjs`);
-const { startCronMaintenance, stopCronMaintenance } = await import(`${dist}maintenance-CT4-WlcF.mjs`);
-const { O: setRuntimeConfigSnapshot } = await import(`${dist}runtime-snapshot-BBYDJbw9.mjs`);
-const { i: openStateDatabase } = await import(`${dist}openclaw-state-db-BtDOU_3j.mjs`);
-const agentDatabases = await import(`${dist}openclaw-agent-db-B8yZC0_a.mjs`);
-const { s: closeStateDatabase } = await import(`${dist}openclaw-state-db-cache-R1v7ogY0.mjs`);
-const { i: getLogger } = await import(`${dist}logger-DR3u4tgD.mjs`);
+const admission = await import(`${dist}agent-database-admission-Cd0xdRDH.mjs`);
+const { t: GatewayScheduler } = await import(`${dist}gateway-scheduler-BjdfyZRv.mjs`);
+const { o: sessionChanges } = await import(`${dist}session-row-changes-BF20_EQW.mjs`);
+const { startCronMaintenance, stopCronMaintenance } = await import(`${dist}maintenance-BNwM4Ebr.mjs`);
+const { O: setRuntimeConfigSnapshot } = await import(`${dist}runtime-snapshot-H_FEWQhh.mjs`);
+const { r: openStateDatabase } = await import(`${dist}openclaw-state-db-C1hCMRMP.mjs`);
+const agentDatabases = await import(`${dist}openclaw-agent-db-CZPdPuop.mjs`);
+const { s: closeStateDatabase } = await import(`${dist}openclaw-state-db-cache-DOGC3Zc3.mjs`);
+const { i: getLogger } = await import(`${dist}logger-C3b6LL2z.mjs`);
 
 let now = 100000;
 const scheduler = new GatewayScheduler({ clock: {
@@ -78,10 +78,10 @@ try {
     visits.push(lifecycle.getStore());
     return cronStorePath;
   }));
-  const pending = admission.c({
+  const pending = admission.l({
     agentId: "main", paths: [database.path], pending: true, reason: "cron context QA pending",
   });
-  admission.v([pending], { source: "startup" });
+  admission.C([pending], { source: "startup" });
   assert.throws(() => admission.n("main"), {
     name: "AgentDatabaseAdmissionError",
     refusal: { ...pending },
@@ -90,7 +90,7 @@ try {
   const gate = Promise.withResolvers();
   let stale;
   let lateEvent;
-  await admission.g(pending, { assertCurrent() {} }, async () => {
+  await admission.v(pending, { assertCurrent() {} }, async () => {
     admission.n("main");
     stale = AsyncLocalStorage.snapshot();
     lateEvent = gate.promise.then(() => lifecycle.run("late-producer", () => {
@@ -158,15 +158,15 @@ try {
   assert.deepEqual(visits, ["lifecycle-one", "lifecycle-one", "lifecycle-two"], "restart must bind the new lifecycle context");
   console.log("PASS stop cancellation and restart context rebinding");
 
-  admission.v([pending], { source: "startup" });
+  admission.C([pending], { source: "startup" });
   assert.throws(() => admission.n("main"), { name: "AgentDatabaseAdmissionError", refusal: { ...pending } });
-  admission.u(pending, new Error("cron context QA inspection failed"), {});
+  admission.d(pending, new Error("cron context QA inspection failed"), {});
   assert.throws(() => admission.n("main"), (error) => {
     assert.ok(error instanceof admission.t);
     assert.equal(error.refusal.code, "agent-database-inspection-failed");
     return true;
   });
-  admission.v([], { source: "startup" });
+  admission.C([], { source: "startup" });
   admission.n("main");
   assert.throws(() => stale(() => admission.n("main")), { message: "Agent database preparation has ended: main" });
   console.log("PASS pending and failed admission refused; public recovered; stale context refused");

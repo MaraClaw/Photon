@@ -19,7 +19,7 @@ REGISTRY: Final = "https://registry.npmjs.org/"
 ALLOWED_SCRIPTS: Final = {
     "openclaw": True,
     "@google/genai@2.32.0": True,
-    "@google/genai@2.27.0": True,
+    "@google/genai@2.30.0": True,
     "esbuild@0.28.2": True,
     "protobufjs@7.6.6": True,
     "protobufjs@8.8.1": True,

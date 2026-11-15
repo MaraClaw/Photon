@@ -32,10 +32,9 @@ RUN sed -i \
     "tini=${TINI_VERSION}" \
     && rm -rf /var/lib/apt/lists/*
 
-ARG OPENCLAW_VERSION=2026.11.3
-ARG OPENCLAW_SHA256=sha256:dae4c4f7549561db2fe5ac43af7ba0c9491f876380f070f7ffb87bf9721a10df
+ARG OPENCLAW_VERSION=2026.11.5-beta.3
+ARG OPENCLAW_SHA256=sha256:58027e45f4932c7e6331218b3ffc34c55626cdbfb10c947396c1570193f19a33
 RUN --mount=type=bind,source=docker/openclaw/openclaw-package,target=/tmp/openclaw-package \
-    --mount=type=bind,source=docker/openclaw/patch-cron-maintenance.py,target=/tmp/patch-cron-maintenance.py \
     npm install -g npm@12.2.2 \
     && install -D -m 0644 -t /opt/openclaw /tmp/openclaw-package/package.json /tmp/openclaw-package/package-lock.json \
     && LOCKED_VERSION=$(node -p 'require("/opt/openclaw/package-lock.json").packages["node_modules/openclaw"].version') \
@@ -49,7 +48,6 @@ RUN --mount=type=bind,source=docker/openclaw/openclaw-package,target=/tmp/opencl
     && printf '%s  %s\n' "$LOCKED_SHA512" "$OPENCLAW_TARBALL" > /tmp/openclaw.lock.sha512 \
     && sha512sum -c /tmp/openclaw.lock.sha512 \
     && npm ci --prefix /opt/openclaw --install-strategy=shallow --omit=dev --no-audit --no-fund \
-    && python3 /tmp/patch-cron-maintenance.py /opt/openclaw/node_modules/openclaw \
     && ln -s /opt/openclaw/node_modules/.bin/openclaw /usr/local/bin/openclaw \
     && rm -f "$OPENCLAW_TARBALL" /tmp/openclaw.tgz.sha256 /tmp/openclaw.lock.sha512 \
     && rm -rf /root/.npm
