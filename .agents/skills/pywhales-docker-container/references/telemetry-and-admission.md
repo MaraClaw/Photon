@@ -34,7 +34,7 @@ affect only new launches, not a stream already in progress. There's no
 monitoring dependency, global observer, background worker, or network export
 by default.
 
-The vocabulary is closed and currently at `schema_version=10` for launch,
+The vocabulary is closed and currently at `schema_version=11` for launch,
 completion, refusal, and admission decision records. On execution records, `family` is
 `"captured"`, `"stream"`, `"archive_load"`, or `"archive_save"`, describing
 the shared execution path, never something inferred from argv; see
@@ -43,10 +43,12 @@ which image operations use the archive families. `outcome` on
 `CompletionRecord` is `"success"`, `"failure"`, `"timeout"`, `"closed"`,
 `"cancelled"` (an `ObservationCancelled`), or `"limit"` (an
 `ObservationLimitError` after launch, including a `max_total_stream_bytes`
-overflow, a `max_total_stdin_bytes` or shared `max_total_io_bytes` limit, or a
-post-start `native_argv` failure).
+overflow, a `max_total_stdin_bytes` or shared `max_total_io_bytes` limit, a
+`max_total_archive_stderr_bytes` overflow, or a post-start `native_argv` failure;
+also a `StreamBufferLimitError` for a stream record or retained stderr bound).
 `ObservationTimeout` and `DockerTimeout`
-stay `"timeout"` and `KeyboardInterrupt` stays `"failure"`. A stream reports the outcome of the error it delivers
+stay `"timeout"`; `KeyboardInterrupt` and ordinary builtin `BufferError` stay
+`"failure"`. A stream reports the outcome of the error it delivers
 (deadline, then scope stop, then reader error), and `close()` keeps a stop
 recorded before it, such as a set cancel token; with none it reports
 `"closed"`. The selected outcome and stop reason stay paired through cleanup and
@@ -78,15 +80,24 @@ and `"limit"` completion.
 `stop_reason: StopReason | None = None`; import `StopReason` from
 `pywhales.telemetry`. Runtime records distinguish a local CLI deadline as
 `command_timeout`, an observation deadline as `scope_timeout`, and cancellation
-as `cancelled`. Limit reasons are `nul`, `argv`, `environment`, `native_argv`,
+as `cancelled`. Observation limit reasons are `nul`, `argv`, `environment`, `native_argv`,
 `native_environment`, `native_limit_unknown`, `native_string`, `native_total`,
 `response`, `total_response`, `total_stream`, `total_stdin`, `total_io`,
-`total_references`, `total_launch_attempts`, and `concurrent_children`. Unknown
-limit reasons map to `other_limit`, so arbitrary reason text never reaches
-records or counter keys. Success, ordinary failure (including `BufferError`),
+`total_references`, `total_launch_attempts`, and `concurrent_children`.
+`StreamBufferLimitError` categories `output_record` and `stderr_history` map to
+`buffer_output_record` and `buffer_stderr_history`, both with outcome `limit`.
+Unknown observation limit reasons map to `other_limit`, so arbitrary reason text
+never reaches records or counter keys. Success, ordinary failure (including builtin `BufferError`),
 and a close without a selected stop have `None`. Launch and admission decision
 records have no stop-reason field. This adds attribution without changing the
 existing outcome categories or launch/refusal correlation.
+
+Archive diagnostic overflow raises `ObservationLimitError` with reason
+`total_archive_stderr`, but records and exporter counters use existing
+`other_limit`. The allowance adds no telemetry reason or schema field. It counts
+actual direct-archive stderr reads, including after reap; see
+[Bound archive diagnostics](registry-and-archives.md#bound-archive-diagnostics)
+for concurrent output draining, error precedence and cleanup.
 
 This covers captured execution, process streams, byte/iterator image load, and
 lazy archive save. A lazy save emits its archive refusal only at first iteration
@@ -118,7 +129,8 @@ nonempty input reports `"limit"` without writing past it. See
 [Bound archive uploads](registry-and-archives.md#bound-archive-uploads).
 
 A stream completes only when its consumer exhausts it, observes a terminal
-error, or closes it; a bare loop `break` doesn't promise a completion record.
+error, or closes it, or after garbage collection of a dropped stream, which a
+background thread closes; a bare loop `break` doesn't promise a completion record.
 Observers run synchronously on the launching/consuming/closing thread, must
 be quick, thread-safe, and non-reentrant, and must not mutate execution state. An ordinary
 `Exception` raised by the observer is contained without being logged and
@@ -273,6 +285,8 @@ with owner.request(control).stream(
 iterator; the permit stays held until exhaustion, an observed failure, or an
 explicit close completes source cleanup and any in-flight read unwinds. A bare
 `break`, local child exit, or unobserved source failure doesn't release it.
+Dropping the stream releases it only after garbage collection, when a
+background thread closes the stream the same way.
 A plain generator needs wrapping in `contextlib.closing` inside the factory.
 Use `stream()`, not `call()`, when returning an owned stream: `call()` releases
 its permit as soon as the callable returns. One stream permit covers all direct
@@ -373,7 +387,7 @@ The owner's `telemetry_observer` is keyword-only and defaults to `None`, separat
 from the client's launch observer. Each activated request produces one immutable
 `AdmissionDecisionRecord` (`phase="admission"`): opaque `admission_id`, closed
 `outcome`, and nonnegative monotonic `duration_seconds` from activation to the
-decision, including lock/queue wait. Schema-10 outcomes are `granted`, `busy`,
+decision, including lock/queue wait. Schema-11 outcomes are `granted`, `busy`,
 `queue_full`, `pending_demand_full`, `owner_pending_demand_full`, `owner_demand_full`, `closed`,
 `queue_timeout`, `cancelled`, and `failed` (including reentry failure).
 `granted` records admission, not successful execution of the callable. Cancelling

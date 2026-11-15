@@ -123,9 +123,13 @@ order, instead of being rejected:
 - Names colliding with the effective child environment or an active
   frozen environment snapshot, compared case-insensitively on Windows.
 
-With `inherit_environment=False`, ordinary names present only in excluded
-ambient state don't collide; explicit client-overlay entries still do. Reserved
-names remain reserved. See [CLI environment isolation](client-and-errors.md#isolate-the-cli-environment).
+With `inherited_environment_names` supplied, or legacy `inherit_environment=False`
+when names are unset, ordinary names present only in excluded ambient state
+don't collide. Selected ambient names and explicit client-overlay entries still
+do, and Windows compares names case-insensitively. The forwarding decision keeps
+its frozen environment through launch even if config changes during argument
+conversion. Reserved names remain reserved. See
+[CLI environment isolation](client-and-errors.md#isolate-the-cli-environment).
 
 `DockerClient(strict_env_transport=True)` turns every entry above into a
 `ValueError` with a fixed message that discloses no name or value; one ineligible
@@ -300,7 +304,8 @@ The inner context owns only the local CLI process, pipes, and reader threads.
 Consume the stream to exhaustion to observe a nonzero command exit as
 `DockerException`. Exiting early or calling `close()` cancels and reaps the
 local CLI; that cancellation isn't proof the command succeeded and doesn't
-remove daemon-managed containers. A bare loop `break` doesn't close a stream.
+remove daemon-managed containers. A bare loop `break` doesn't close a stream;
+a dropped stream is closed only after garbage collection, so close it yourself.
 Recorded deadline, observation, or reader errors remain deliverable once after
 `close()` or on a clean context exit; cleanup preserves an active body exception.
 
@@ -316,14 +321,80 @@ raises `ParsingError` and leaves the cached data and refresh time untouched.
 
 ## Copy Files or Export a Filesystem
 
-`docker.copy(source, destination, *, timeout=None)` accepts a local path and a
+`docker.copy(source, destination, *, archive=False, follow_link=False,
+quiet=False, timeout=None)` accepts a local path and a
 `(container, path_in_container)` endpoint, in either direction. Local paths refer
 to the Python host, unlike bind mounts. It returns `None` and doesn't accept
 byte iterators. `Container.copy_from()` and `copy_to()` forward the same
-keyword-only local deadline.
+copy flags and keyword-only local deadline.
 
 `docker.export(container, output, *, timeout=None)` writes the container
 filesystem to a local tar path and returns `None`; `Container.export()` takes
 the output path and the same deadline. It doesn't return archive chunks and
 isn't an image backup. For image archives, use
 [save and load](registry-and-archives.md#save-and-load).
+
+## Docker CLI 29 Container Changes
+
+Container `create` and `run` no longer accept `content_trust` or
+`kernel_memory`, `update` no longer accepts `kernel_memory`, and `run` no longer
+accepts `service_ports`. Passing one raises `TypeError`. The `trust` command group is gone too, because Docker CLI 29 removed
+`docker trust`; see
+[Docker CLI 29 surface changes](client-and-errors.md#docker-cli-29-surface-changes).
+
+`create` and `run` gained keyword-only `annotations` (a mapping), `cpu_count`,
+`cpu_percent`, `io_maxbandwidth`, `io_maxiops`, `umask`, `use_api_socket`, and
+`quiet`. `run` also takes `detach_keys` and `attach`, an iterable of `"stdin"`,
+`"stdout"`, and `"stderr"`. Other methods changed as follows:
+
+| Method | Change |
+| --- | --- |
+| `commit` | Keyword-only `changes` (a string or iterable of Dockerfile instructions); `pause=False` now emits `--no-pause` |
+| `docker.copy`, `Container.copy_from`, `Container.copy_to` | Keyword-only `archive`, `follow_link`, and `quiet`, all `False` by default |
+| `inspect` | Keyword-only `size=False` forwards `--size` |
+| `list` | Keyword-only `last` (an `int`) and `latest` |
+| `remove` | Keyword-only `link=False` forwards `--link` |
+| `stop`, `restart` | Keyword-only `signal`; the existing `time` argument now emits `--timeout` instead of the deprecated `--time` |
+| `start` | Keyword-only `checkpoint` and `checkpoint_dir` |
+
+### Published ports
+
+`container.port(container, private_port=None, protocol=None)` runs
+`docker port` and returns `list[PublishedPort]`. `Container.port()` and the root
+alias `docker.port` mirror it; the handle method omits the `container` argument:
+
+```python
+from pywhales import DockerClient
+
+docker = DockerClient()
+# `container` is a running Container with a published port.
+for mapping in docker.port(container, 80, "tcp"):
+    print(mapping.host_ip, mapping.host_port)
+```
+
+`PublishedPort` is a frozen dataclass in
+`pywhales.components.container.cli_wrapper` with `container_port` (`str`),
+`host_ip` (`str`), and `host_port` (`int`).
+
+### Checkpoints
+
+`docker.checkpoint` is a command group on the client:
+
+```python
+from pywhales import DockerClient
+
+docker = DockerClient()
+docker.checkpoint.create("job", "cp1", leave_running=True)
+print(docker.checkpoint.list("job"))  # list[str]
+docker.checkpoint.remove("job", "cp1")
+```
+
+`create(container, checkpoint, *, checkpoint_dir=None, leave_running=False,
+timeout=None)` stops the container after the checkpoint unless
+`leave_running=True`. Its `timeout` is a local CLI deadline.
+`list(container, *, checkpoint_dir=None)` returns checkpoint names and
+`remove(container, checkpoint, *, checkpoint_dir=None)` returns `None`. Restore
+by passing `checkpoint=` (and optionally `checkpoint_dir=`) to `start`.
+Checkpointing needs an experimental daemon with CRIU; without them these calls
+raise `DockerException`, so don't treat the group's presence as proof the engine
+supports it.
