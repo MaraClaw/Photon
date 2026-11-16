@@ -21,7 +21,7 @@ for (const directory of ["home", "state", "workspace", "agent"]) {
 const dist = "/opt/openclaw/node_modules/openclaw/dist/";
 const { createSessionMcpRuntime } = await import(`${dist}agents/agent-bundle-mcp-runtime.js`);
 const { t: runtimeOwners } = await import(`${dist}agent-bundle-mcp-runtime-owner-CVj3eW-g.mjs`);
-const { t: StdioTransport } = await import(`${dist}mcp-stdio-transport-6fqgmAK3.mjs`);
+const { t: StdioTransport } = await import(`${dist}mcp-stdio-transport-p_g6aOOU.mjs`);
 const { n: withRequestSignal } = await import(`${dist}agent-bundle-mcp-request-context-SAxiq07-.mjs`);
 
 // Observe the actual owned child; transport connection, messages and cleanup stay real.
