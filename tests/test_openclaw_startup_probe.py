@@ -93,11 +93,12 @@ def test_timed_out_probe_stops_waiting_once_its_group_exits(tmp_path: Path) -> N
 
 
 @pytest.mark.parametrize("probe", ["hang", "exit"])
-def test_descendant_that_escaped_the_group_cannot_hold_the_probe(tmp_path: Path, probe: str) -> None:
+@pytest.mark.parametrize("grace", ["0.2", "0.003"])
+def test_descendant_that_escaped_the_group_cannot_hold_the_probe(tmp_path: Path, probe: str, grace: str) -> None:
     # Given a probe whose descendant moved to its own session and ignores TERM.
     with escaped_descendant(tmp_path) as pid_file:
         # When the probe times out, or finishes while the descendant lives on.
-        status, elapsed = run_probe(tmp_path, "0.5", "0.2", sys.executable, "-c", ESCAPE, str(pid_file), probe)
+        status, elapsed = run_probe(tmp_path, "0.5", grace, sys.executable, "-c", ESCAPE, str(pid_file), probe)
 
         # Then the probe's own result is reported within its bounds.
         assert status == (124 if probe == "hang" else 0)

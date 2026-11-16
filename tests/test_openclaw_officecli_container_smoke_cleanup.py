@@ -7,7 +7,17 @@ import pytest
 from pywhales import DockerException
 
 from openclaw_officecli_smoke_cleanup import CLEANUP_PROBE, CleanupFailure, cleanup_error_message, run_cleanup
-from openclaw_officecli_smoke_runtime import RunRequest, SmokeWorkspace, create_workspace, probe_gateway, run_container, wait_for_gateway
+from openclaw_officecli_smoke_probe import CHILD_MARKER
+from openclaw_officecli_smoke_runtime import (
+    RunRequest,
+    SmokeWorkspace,
+    create_workspace,
+    probe_gateway,
+    run_container,
+    run_gateway_scenarios,
+    run_gateway_smoke,
+    wait_for_gateway,
+)
 
 
 def test_cleanup_probe_makes_state_contents_writable(tmp_path: Path) -> None:
@@ -120,19 +130,31 @@ def test_partial_build_cleanup_continues_after_normalization_failure(tmp_path: P
     root = tmp_path / "workspace"
     root.mkdir()
     workspace = SmokeWorkspace(root, "partial", root / "keyring")
+    workspace.owns_builder = True
+    workspace.built_architectures.add("amd64")
+    for scenario in ("fresh", "custom"):
+        state = root / "amd64" / scenario
+        state.mkdir(parents=True)
+        workspace.state_mounts["amd64", scenario] = state
+        workspace.containers.append(workspace.container("amd64", scenario))
+    workspace.containers.append(workspace.container("amd64", "memory"))
     remove_container = Mock()
     remove_image = Mock()
     remove_builder = Mock()
     monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.remove", remove_container)
-    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.image.exists", lambda image: image.endswith("amd64"))
+    image_exists = Mock(side_effect=lambda image: image == workspace.image("amd64"))
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.image.exists", image_exists)
     monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.image.remove", remove_image)
     monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.run", Mock(side_effect=RuntimeError("normalization failed")))
     monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.buildx.list", lambda: [SimpleNamespace(name=workspace.builder)])
     monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.buildx.remove", remove_builder)
     failures = workspace.cleanup()
     assert [failure.phase for failure in failures] == ["permission normalization: amd64/fresh", "permission normalization: amd64/custom"]
-    assert remove_container.call_count == 10
-    remove_image.assert_called_once_with(workspace.image("amd64"), force=True)
+    assert [call.args[0] for call in remove_container.call_args_list] == [
+        workspace.container("amd64", scenario) for scenario in ("fresh", "custom", "memory", "cleanup-fresh", "cleanup-custom")
+    ]
+    assert all(call.args == (workspace.image("amd64"),) for call in image_exists.call_args_list)
+    remove_image.assert_called_once_with(workspace.image("amd64"), force=True, prune=False)
     remove_builder.assert_called_once_with(workspace.builder)
     assert not root.exists()
 
@@ -149,3 +171,99 @@ def test_workspace_setup_failure_removes_partial_state(tmp_path: Path, monkeypat
     with pytest.raises(PermissionError, match="setup failure"):
         create_workspace()
     assert not root.exists()
+
+
+def test_borrowed_image_survives_failed_gateway_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "borrowed"
+    root.mkdir()
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.tempfile.mkdtemp", lambda **kwargs: str(root))
+    run = Mock(side_effect=[RuntimeError("gateway launch failed"), ""])
+    remove_container = Mock()
+    image_remove = Mock()
+    builder_list = Mock()
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.run", run)
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.remove", remove_container)
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.image.exists", lambda image: image == "borrowed:arm64")
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.image.remove", image_remove)
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.buildx.list", builder_list)
+
+    with pytest.raises(RuntimeError, match="gateway launch failed"):
+        run_gateway_smoke("borrowed:arm64", "arm64")
+
+    assert not root.exists()
+    assert [call.args for call in run.call_args_list] == [
+        ("borrowed:arm64",), ("borrowed:arm64", ["-c", CLEANUP_PROBE]),
+    ]
+    assert all(call.kwargs["platform"] == "linux/arm64" for call in run.call_args_list)
+    assert len(remove_container.call_args_list) == 2
+    assert all("-arm64-" in call.args[0] for call in remove_container.call_args_list)
+    image_remove.assert_not_called()
+    builder_list.assert_not_called()
+
+
+def test_selected_workspace_setup_creates_only_requested_architecture() -> None:
+    workspace = create_workspace(("arm64",), borrowed_image="borrowed:arm64")
+    try:
+        assert sorted(path.name for path in workspace.root.iterdir()) == ["arm64", "gogcli-keyring-password"]
+        assert sorted(path.name for path in (workspace.root / "arm64").iterdir()) == ["custom", "fresh"]
+        assert workspace.image("arm64") == "borrowed:arm64"
+        with pytest.raises(ValueError, match="architecture not selected"):
+            workspace.image("amd64")
+    finally:
+        assert workspace.cleanup() == ()
+
+
+@pytest.mark.parametrize("state_exists,image_exists", [(False, True), (True, False)])
+def test_missing_state_or_image_does_not_launch_cleanup_container(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state_exists: bool, image_exists: bool,
+) -> None:
+    root = tmp_path / "partial"
+    root.mkdir()
+    workspace = SmokeWorkspace(root, "partial", root / "keyring", ("arm64",), "borrowed:arm64")
+    state = root / "arm64" / "fresh"
+    if state_exists:
+        state.mkdir(parents=True)
+    workspace.state_mounts["arm64", "fresh"] = state
+    run = Mock()
+    remove_container = Mock()
+    image_remove = Mock()
+    builder_list = Mock()
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.run", run)
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.remove", remove_container)
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.image.exists", lambda image: image_exists)
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.image.remove", image_remove)
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.buildx.list", builder_list)
+
+    assert workspace.cleanup() == ()
+
+    assert not root.exists()
+    run.assert_not_called()
+    remove_container.assert_not_called()
+    image_remove.assert_not_called()
+    builder_list.assert_not_called()
+
+
+def test_memory_probe_creation_failure_still_removes_owned_container(monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace = create_workspace(("arm64",), borrowed_image="borrowed:arm64")
+    remove_container = Mock()
+    image_remove = Mock()
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.run", Mock())
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.stop", Mock())
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.wait_for_gateway", Mock())
+    monkeypatch.setattr(
+        "openclaw_officecli_smoke_runtime.probe_gateway",
+        lambda *args: (workspace.root / "arm64" / "fresh" / CHILD_MARKER).touch() or "",
+    )
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.create", Mock(side_effect=RuntimeError("memory create timed out")))
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.remove", remove_container)
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.image.exists", lambda image: True)
+    monkeypatch.setattr("openclaw_officecli_smoke_runtime.docker.image.remove", image_remove)
+    try:
+        with pytest.raises(RuntimeError, match="memory create timed out"):
+            run_gateway_scenarios(workspace, "arm64")
+    finally:
+        assert workspace.cleanup() == ()
+
+    assert workspace.container("arm64", "memory") in [call.args[0] for call in remove_container.call_args_list]
+    image_remove.assert_not_called()
+    assert not workspace.root.exists()

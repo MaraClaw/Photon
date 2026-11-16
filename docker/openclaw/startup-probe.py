@@ -156,17 +156,22 @@ def reap_escaped(grace: float) -> None:
         except ChildProcessError:
             return
         now = time.monotonic()
-        if now >= give_up:
-            return
-        if now >= deadline:
+        if signum != signal.SIGKILL and now >= deadline:
             signum = signal.SIGKILL
             signalled.clear()
+            # Start the bounded reaping grace when KILL is actually sent, even if the
+            # supervisor was descheduled past both of the original deadlines.
+            give_up = now + grace
         for pid, ppid, _ in live_processes():
             if ppid == os.getpid() and pid not in signalled:
                 with contextlib.suppress(ProcessLookupError):
                     os.kill(pid, signum)
                 signalled.add(pid)
-        time.sleep(0.02)
+        next_deadline = give_up if signum == signal.SIGKILL else deadline
+        remaining = next_deadline - time.monotonic()
+        if signum == signal.SIGKILL and now >= give_up:
+            return
+        time.sleep(min(0.02, max(0, remaining)))
 
 
 def spawn_probe(command: list[str], *, capture: bool) -> Step:

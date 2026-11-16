@@ -10,7 +10,7 @@ import pytest
 
 from openclaw_probe_test_support import (
     INVALID_POLICY, POLICY_KEYS, clean_policy, exercise_final_child,
-    exercise_invalid_policy, exercise_script_lookup, exercise_signal, exercise_success_cleanup, exercise_timeout, install_hang, prepare_integrity, python_launches, rebaseline,
+    exercise_invalid_policy, exercise_script_lookup, exercise_signal, exercise_success_cleanup, exercise_timeout, install_hang, prepare_integrity, python_launches, readiness, rebaseline, validator_process,
 )
 
 VALIDATORS = Path(__file__).resolve().parents[1] / "docker/openclaw"
@@ -261,3 +261,100 @@ def test_cli_validator_without_keyring_starts_one_interpreter(cli_validator: tup
     script, env, name = cli_validator
     assert python_launches(script, env) == ["startup-probe.py"]
     assert Path(env["PROBE_LOG"]).read_text().splitlines() == [f"{name}:--version"]
+
+
+@pytest.mark.parametrize("suffix", ["control", "1"])
+def test_abandoned_predictable_probe_paths_do_not_block_or_get_removed(
+    validator: tuple[Path, dict[str, str]], tmp_path: Path, suffix: str,
+) -> None:
+    script, env = validator
+    temporary = tmp_path / "probe-tmp"
+    temporary.mkdir()
+    password = tmp_path / "password"
+    password.write_text("private keyring value\n")
+    env.update({
+        "TMPDIR": str(temporary), "STALE_SUFFIX": suffix,
+        "GOG_KEYRING_PASSWORD_FILE": str(password), "GOG_HOME": str(tmp_path / "gog-home"),
+    })
+    child = (
+        "import json, os, sys; from pathlib import Path; "
+        "Path(os.environ['CHILD_LOG']).write_text(json.dumps({"
+        "'pid': os.getpid(), 'stale': os.environ['STALE_PATH'], "
+        "'password': os.environ['GOG_KEYRING_PASSWORD'], 'argv': sys.argv[1:]})); "
+        "sys.exit(37)"
+    )
+    result = subprocess.run(
+        [
+            "/bin/sh", "-c",
+            'stale=$TMPDIR/openclaw-probe.$$.$STALE_SUFFIX; '
+            'printf "%s" abandoned >"$stale"; export STALE_PATH=$stale; exec "$@"',
+            "sh", "/bin/sh", str(script), sys.executable, "-c", child, "space value", "",
+        ],
+        env=env, capture_output=True, text=True, timeout=10, check=False,
+    )
+    assert result.returncode == 37, result.stderr
+    assert result.stdout == result.stderr == ""
+    report = json.loads(Path(env["CHILD_LOG"]).read_text())
+    stale = Path(report["stale"])
+    assert stale == temporary / f"openclaw-probe.{report['pid']}.{suffix}"
+    assert report["password"] == "private keyring value"
+    assert report["argv"] == ["space value", ""]
+    assert stale.read_text() == "abandoned"
+    assert list(temporary.iterdir()) == [stale]
+
+
+def test_concurrent_captures_are_private_and_cancellation_removes_only_owned_storage(
+    validator: tuple[Path, dict[str, str]], tmp_path: Path,
+) -> None:
+    script, env = validator
+    temporary = tmp_path / "probe-tmp"
+    temporary.mkdir()
+    password = tmp_path / "password"
+    password.write_text("private captured value\n")
+    actor = tmp_path / "capture_actor.py"
+    actor.write_text(
+        "import os, sys\nfrom pathlib import Path\n"
+        "sys.stdout.write(Path(sys.argv[1]).read_text()); sys.stdout.flush()\n"
+        "Path(os.environ['PROBE_PID_FILE']).write_text(str(os.getpid()))\n"
+        "with open(os.environ['PROBE_READY'], 'w') as ready:\n"
+        "    ready.write(str(os.getpid()) + '\\n')\n"
+        "with open(os.environ['CAPTURE_RELEASE']) as release: release.read(1)\n"
+    )
+    cat = script.parent / "bin with spaces" / "cat"
+    cat.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{actor}" "$@"\n')
+    cat.chmod(0o755)
+    environments = []
+    for index in range(2):
+        ready = tmp_path / f"capture-ready-{index}"
+        release = tmp_path / f"capture-release-{index}"
+        os.mkfifo(ready)
+        os.mkfifo(release)
+        environments.append(env | {
+            "TMPDIR": str(temporary), "GOG_KEYRING_PASSWORD_FILE": str(password),
+            "GOG_HOME": str(tmp_path / f"gog-home-{index}"),
+            "PROBE_READY": str(ready), "PROBE_PID_FILE": str(tmp_path / f"capture-pid-{index}"),
+            "CAPTURE_RELEASE": str(release), "OPENCLAW_PROBE_TIMEOUT_SECONDS": "30",
+            "OPENCLAW_PROBE_GRACE_SECONDS": "0.1",
+        })
+    with validator_process(script, environments[0], sys.executable, "-c", "pass") as (first, first_ready):
+        readiness(first_ready)
+        first_directory, = temporary.iterdir()
+        with validator_process(script, environments[1], sys.executable, "-c", "pass") as (second, second_ready):
+            readiness(second_ready)
+            directories = set(temporary.iterdir())
+            assert len(directories) == 2
+            for directory in directories:
+                assert directory.is_dir()
+                assert directory.stat().st_mode & 0o777 == 0o700
+                files = list(directory.iterdir())
+                assert len(files) == 2
+                assert all(path.stat().st_mode & 0o077 == 0 for path in files)
+                assert any(path.read_text() == password.read_text() for path in files)
+            first.send_signal(signal.SIGTERM)
+            assert first.wait(timeout=5) == 143
+            assert set(temporary.iterdir()) == directories - {first_directory}
+            assert second.poll() is None
+            with open(environments[1]["CAPTURE_RELEASE"], "r+b", buffering=0) as release:
+                release.write(b"x")
+                assert second.wait(timeout=5) == 0
+            assert not list(temporary.iterdir())

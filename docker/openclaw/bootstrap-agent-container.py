@@ -15,6 +15,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
@@ -42,6 +43,18 @@ TERMINATION_GRACE_SECONDS: Final = 2.0
 POLL_SECONDS: Final = 0.1
 TERMINATING: Final = frozenset({signal.SIGHUP, signal.SIGINT, signal.SIGQUIT, signal.SIGTERM})
 RELAYED: Final = TERMINATING | {signal.SIGUSR1, signal.SIGUSR2}
+ROOT_BOOLEAN_FLAGS: Final = frozenset({"--dev", "--no-color"})
+ROOT_VALUE_FLAGS: Final = frozenset({"--profile", "--log-level", "--container"})
+GATEWAY_BOOLEAN_FLAGS: Final = frozenset({
+    "--tailscale-reset-on-exit", "--allow-unconfigured", "--dev", "--ambient-channels",
+    "--dev-ambient-channels", "--reset", "--update-canary", "--force", "--verbose",
+    "--cli-backend-logs", "--claude-cli-logs", "--compact", "--raw-stream", "--task-supervisor",
+})
+GATEWAY_VALUE_FLAGS: Final = frozenset({
+    "--port", "--bind", "--token", "--token-file", "--auth", "--password",
+    "--password-file", "--tailscale", "--ws-log", "--raw-stream-path", "--task-supervisor-child",
+})
+PROFILE_NAME: Final = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,21 +74,114 @@ def startup_budget() -> float:
     return value
 
 
-def port_flag(command: list[str]) -> str | None:
-    """The value of `--port N` or `--port=N` on the gateway command line, if any."""
-    for index, token in enumerate(command[2:], start=2):
-        if token.startswith("--port="):
-            return token.partition("=")[2]
-        if token == "--port":
-            return command[index + 1] if index + 1 < len(command) else ""
-    return None
+@dataclass(frozen=True, slots=True)
+class GatewayInvocation:
+    port: str | None
+    profile: str | None
 
 
-def gateway_port(command: list[str]) -> int:
-    """OpenClaw's own precedence: --port, then OPENCLAW_GATEWAY_PORT, then 18789."""
-    flagged = port_flag(command)
-    setting = PORT_SETTING if flagged is None else "--port"
-    raw = os.environ.get(PORT_SETTING, "18789") if flagged is None else flagged
+def gateway_invocation(command: list[str]) -> GatewayInvocation | None:
+    """Pinned CLI option roles, without rewriting argv or treating option values as commands."""
+    if not command or Path(command[0]).name != "openclaw":
+        return None
+    found_gateway = literal = root_dev = container = False
+    profile = port = None
+    positionals: list[str] = []
+    index = 1
+    while index < len(command):
+        token = command[index]
+        if not literal and token == "--":
+            literal = True
+            index += 1
+            continue
+        flag, equals, inline = token.partition("=")
+        root = not literal and (flag in ROOT_BOOLEAN_FLAGS or flag in ROOT_VALUE_FLAGS)
+        boolean = root and flag in ROOT_BOOLEAN_FLAGS or not literal and flag in GATEWAY_BOOLEAN_FLAGS
+        valued = root and flag in ROOT_VALUE_FLAGS or not literal and flag in GATEWAY_VALUE_FLAGS
+        if not literal and token.startswith("-"):
+            if boolean:
+                if equals or not root and not found_gateway:
+                    return None
+                if flag == "--dev" and not found_gateway:
+                    if profile is not None and profile != "dev":
+                        return None
+                    root_dev, profile = True, "dev"
+            elif valued:
+                if not root and not found_gateway:
+                    return None
+                if equals:
+                    value = inline
+                else:
+                    index += 1
+                    if index >= len(command):
+                        return None
+                    value = command[index]
+                if root and not value.strip():
+                    return None
+                if flag == "--profile":
+                    selected = value.strip()
+                    if root_dev or not PROFILE_NAME.fullmatch(selected):
+                        return None
+                    profile = selected
+                elif flag == "--container":
+                    container = True
+                elif flag == "--port":
+                    port = value
+            else:
+                return None
+        elif not found_gateway:
+            if token != "gateway":
+                return None
+            found_gateway = True
+        else:
+            positionals.append(token)
+        index += 1
+    if not found_gateway or positionals not in ([], ["run"]) or container and profile is not None:
+        return None
+    return GatewayInvocation(port, profile)
+
+
+def profile_environment(profile: str | None) -> Mapping[str, str]:
+    """Apply the pinned CLI's root profile selectors to registration and readiness, not child argv."""
+    if profile is None:
+        return os.environ
+    environ = dict(os.environ)
+    canonical = {key: value for key, value in environ.items() if key not in {"OPENCLAW_STATE_DIR", "OPENCLAW_CONFIG_PATH"}}
+    previous = builtin_mcp.config_path(canonical).parent
+    selected = builtin_mcp.config_path(canonical | {"OPENCLAW_PROFILE": profile}).parent
+    state = environ.get("OPENCLAW_STATE_DIR", "").strip()
+    config = environ.get("OPENCLAW_CONFIG_PATH", "").strip()
+    changed = previous != selected
+    inherited_state = bool(state and changed and builtin_mcp.config_path(environ | {"OPENCLAW_CONFIG_PATH": ""}).parent == previous)
+    inherited_config = bool(changed and (not state or inherited_state) and config and builtin_mcp.config_path(environ) == previous / "openclaw.json")
+    service = environ.get("OPENCLAW_SERVICE_MARKER", "").strip() == "openclaw" and environ.get("OPENCLAW_SERVICE_KIND", "").strip() in {"", "gateway"}
+    inherited_service = service and inherited_state and inherited_config
+    if inherited_service:
+        for key in ("OPENCLAW_STATE_DIR", "OPENCLAW_CONFIG_PATH", "OPENCLAW_PROFILE", PORT_SETTING,
+                    "OPENCLAW_LAUNCHD_LABEL", "OPENCLAW_SYSTEMD_UNIT", "OPENCLAW_WINDOWS_TASK_NAME"):
+            environ.pop(key, None)
+    environ["OPENCLAW_PROFILE"] = profile
+    target = state if state and not inherited_state else str(selected)
+    if not state or inherited_state:
+        environ["OPENCLAW_STATE_DIR"] = target
+    if not inherited_service and (not config or inherited_config):
+        environ["OPENCLAW_CONFIG_PATH"] = str(Path(target) / "openclaw.json")
+    if profile == "dev" and not environ.get(PORT_SETTING, "").strip():
+        environ[PORT_SETTING] = "19001"
+    return environ
+
+
+def gateway_port(invocation: GatewayInvocation, environ: Mapping[str, str]) -> int:
+    """Flag and environment precedence, with the pinned CLI's selected-profile default."""
+    profile = environ.get("OPENCLAW_PROFILE", "").strip()
+    default = 18789
+    if profile.lower() != "default" and PROFILE_NAME.fullmatch(profile):
+        hashed = 2166136261
+        for byte in profile.encode("utf-8"):
+            hashed = ((hashed ^ byte) * 16777619) & 0xFFFFFFFF
+        default = 20000 + hashed % 40000
+    setting = PORT_SETTING if invocation.port is None else "--port"
+    raw = environ.get(PORT_SETTING, str(default)) if invocation.port is None else invocation.port
     port = int(raw) if PORT.fullmatch(raw) else 0
     if not 0 < port <= 65535:
         raise PolicyError(setting, "a TCP port number")
@@ -181,13 +287,14 @@ def await_ready(child: subprocess.Popen[bytes], signals: SignalQueue, port: int,
             time.sleep(min(POLL_SECONDS, max(0.0, deadline - time.monotonic())))
 
 
-def serve_gateway(command: list[str]) -> int:
-    port = gateway_port(command)
+def serve_gateway(command: list[str], invocation: GatewayInvocation) -> int:
+    environ = profile_environment(invocation.profile)
+    port = gateway_port(invocation, environ)
     budget = startup_budget()
     identity = GuestIdentity.read()
     signals = SignalQueue()
     invalidate_event()
-    builtin_mcp.register(report)
+    builtin_mcp.register(report, environ=environ)
     try:
         child = subprocess.Popen(command, start_new_session=True)
     except OSError as error:
@@ -195,7 +302,7 @@ def serve_gateway(command: list[str]) -> int:
     if (outcome := await_ready(child, signals, port, budget)) is not None:
         return outcome
     try:
-        publish_event(identity)
+        publish_event(identity, port)
     except OSError as error:
         stop(child)
         report(f"cannot publish {EVENT_NAME}: {error.strerror}")
@@ -209,14 +316,6 @@ def serve_gateway(command: list[str]) -> int:
         invalidate_event()
 
 
-def runs_gateway(command: list[str]) -> bool:
-    """True for the long-running `openclaw gateway [run] [--option ...]`, not its management subcommands."""
-    if len(command) < 2 or Path(command[0]).name != "openclaw" or command[1] != "gateway":
-        return False
-    rest = command[2:]
-    return not rest or rest[0].startswith("-") or rest[0] == "run"
-
-
 def pending(reason: Reason) -> int:
     report(f"bootstrap pending: {reason}")
     return PENDING_EXIT
@@ -226,18 +325,21 @@ def main(argv: list[str]) -> int:
     try:
         match argv:
             case ["check-ready"]:
-                if (reason := verify_event()) is not None:
-                    return pending(reason)
-                return 0 if readyz_answers(gateway_port([]), READYZ_TIMEOUT_SECONDS) else 1
+                verified = verify_event()
+                if isinstance(verified, Reason):
+                    return pending(verified)
+                return 0 if readyz_answers(verified, READYZ_TIMEOUT_SECONDS) else 1
             case ["exec", "--", *action] if action:
-                if (reason := verify_event()) is not None:
-                    return pending(reason)
+                verified = verify_event()
+                if isinstance(verified, Reason):
+                    return pending(verified)
                 return exec_command(action)
             case [] | ["exec", *_] | ["check-ready", *_]:
                 report("usage: check-ready | exec -- ACTION... | COMMAND...")
                 return 2
             case [*command]:
-                return serve_gateway(command) if runs_gateway(command) else exec_command(command)
+                invocation = gateway_invocation(command)
+                return serve_gateway(command, invocation) if invocation is not None else exec_command(command)
     except PolicyError as error:
         report(str(error))
         return 2

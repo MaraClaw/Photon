@@ -29,10 +29,16 @@ def fake_probe() -> None:
     child_pid = os.fork()
     if child_pid == 0:
         os.close(read_fd)
+        if mode.startswith("escaped"):
+            os.setsid()
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         with open(os.environ["READY_FIFO"], "w", encoding="utf-8") as ready:
             ready.write(f"{parent_pid} {os.getpid()}\n")
-        os.write(write_fd, b"1")
+        try:
+            os.write(write_fd, b"1")
+        except BrokenPipeError:
+            # A cancellation may already have killed the parent after readiness was sent.
+            pass
         os.close(write_fd)
         while True:
             signal.pause()
@@ -40,7 +46,7 @@ def fake_probe() -> None:
     os.close(write_fd)
     os.read(read_fd, 1)
     os.close(read_fd)
-    if mode == "early":
+    if mode.endswith("early"):
         os._exit(0)
     while True:
         signal.pause()
@@ -73,15 +79,20 @@ def prepare(directory: Path) -> tuple[dict[str, Path], dict[str, str]]:
         script = directory / f"validate-{name}.sh"
         script.write_text(text)
         scripts[name] = script
+    probe_tmp = directory / "probe-tmp"
+    probe_tmp.mkdir()
     env = os.environ | {
         "PATH": f'{binary_dir}:{os.environ["PATH"]}',
         "PROBE_MARKER": str(directory / "probe-marker"),
         "OPENCLAW_PROBE_GRACE_SECONDS": "0.2",
+        "TMPDIR": str(probe_tmp),
     }
     return scripts, env
 
 
-def direct_failure(script: Path, env: dict[str, str], signum: int | None, *, early: bool = False) -> None:
+def direct_failure(
+    script: Path, env: dict[str, str], signum: int | None, *, early: bool = False, escaped: bool = False,
+) -> None:
     fifo = script.parent / "ready"
     marker = script.parent / "delegated"
     pid_file = script.parent / "probe-pids"
@@ -93,9 +104,10 @@ def direct_failure(script: Path, env: dict[str, str], signum: int | None, *, ear
     environment = env | {
         "READY_FIFO": str(fifo),
         "PID_FILE": str(pid_file),
-        "PROBE_MODE": "early" if early else "hang",
+        "PROBE_MODE": ("escaped-" if escaped else "") + ("early" if early else "hang"),
         "PROBE_TARGET": {"validate-gogcli.sh": "gog", "validate-officecli.sh": "officecli"}.get(script.name, "inventory"),
         "OPENCLAW_PROBE_TIMEOUT_SECONDS": "15" if signum is None else "30",
+        "OPENCLAW_PROBE_GRACE_SECONDS": "0.003" if escaped else env["OPENCLAW_PROBE_GRACE_SECONDS"],
     }
     process = subprocess.Popen(
         ["/bin/sh", str(script), sys.executable, "-c", "from pathlib import Path; Path(__import__('sys').argv[1]).touch()", str(marker)],
@@ -115,6 +127,7 @@ def direct_failure(script: Path, env: dict[str, str], signum: int | None, *, ear
         assert marker.exists() == early, script.name
         assert not Path(f"/proc/{probe_pid}").exists(), (script.name, probe_pid)
         assert not Path(f"/proc/{descendant_pid}").exists(), (script.name, descendant_pid)
+        assert not list(Path(env["TMPDIR"]).iterdir()), script.name
     finally:
         os.close(read_fd)
         if process.poll() is None:
@@ -126,13 +139,12 @@ def direct_failure(script: Path, env: dict[str, str], signum: int | None, *, ear
                 process.wait()
         if not probe_pid and pid_file.exists():
             probe_pid, descendant_pid = map(int, pid_file.read_text().split())
-        if probe_pid and (Path(f"/proc/{probe_pid}").exists() or Path(f"/proc/{descendant_pid}").exists()):
-            try:
-                os.killpg(probe_pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
         for child_pid in (probe_pid, descendant_pid):
             if child_pid:
+                try:
+                    os.kill(child_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
                 try:
                     os.waitpid(child_pid, 0)
                 except ChildProcessError:
@@ -159,6 +171,17 @@ def direct_handoff(script: Path, env: dict[str, str]) -> None:
         assert readable, "final child never became ready"
         assert int(os.read(read_fd, 128)) == process.pid
         assert not Path(f"/proc/{process.pid}/task/{process.pid}/children").read_text().strip()
+        probe_prefix = f"{Path(env['TMPDIR']).resolve()}/"
+        leaked = []
+        for descriptor in Path(f"/proc/{process.pid}/fd").iterdir():
+            try:
+                target = os.readlink(descriptor)
+            except FileNotFoundError:
+                continue
+            if target.startswith(probe_prefix):
+                leaked.append(target)
+        assert not leaked, f"probe descriptors leaked across exec: {leaked}"
+        assert not list(Path(env["TMPDIR"]).iterdir()), "probe storage leaked across exec"
         assert process.poll() is None
         assert not select.select([read_fd], [], [], 11)[0]
         assert process.poll() is None, "final child was timed out"
@@ -216,6 +239,9 @@ def main() -> None:
                 direct_failure(script, env, signum)
             print(f"{name}: invalid policy, timeout, HUP/INT/TERM cleanup passed", flush=True)
         direct_failure(scripts["gogcli"], env, None, early=True)
+        direct_failure(scripts["gogcli"], env, None, early=True, escaped=True)
+        direct_failure(scripts["gogcli"], env, signal.SIGTERM, escaped=True)
+        print("escaped descendants killed and reaped with a 3ms grace", flush=True)
         direct_handoff(scripts["gogcli"], env)
         interpreter_launches(Path(temporary))
     print("normal entrypoint and direct final handoff passed", flush=True)

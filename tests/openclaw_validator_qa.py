@@ -5,6 +5,8 @@ from uuid import uuid4
 
 from pywhales import docker
 
+from openclaw_officecli_smoke_runtime import run_gateway_smoke
+
 SUPPORTED_PLATFORMS = ("linux/amd64", "linux/arm64")
 
 
@@ -163,6 +165,28 @@ def main() -> None:
                 ),
                 end="",
             )
+            print(f"Running MCP reconnect QA for {platform}: {container}", flush=True)
+            print(
+                docker.run(
+                    image,
+                    ["/tmp/openclaw-mcp-runtime-qa.mjs"],
+                    entrypoint="node",
+                    name=container,
+                    remove=True,
+                    init=True,
+                    networks=["none"],
+                    platform=platform,
+                    read_only=True,
+                    tmpfs=["/tmp:rw,exec,nosuid,mode=1777,size=512m"],
+                    envs={"TMPDIR": "/tmp", "NODE_COMPILE_CACHE": "/tmp/node-compile-cache",
+                          "BUN_RUNTIME_TRANSPILER_CACHE_PATH": "/tmp/bun-transpiler"},
+                    volumes=[(root / "tests/openclaw_mcp_runtime_qa.mjs", "/tmp/openclaw-mcp-runtime-qa.mjs", "ro")],
+                    timeout=120,
+                ),
+                end="",
+            )
+            print(f"Running gateway, skills, OfficeCLI and memory smoke for {platform}: {image}", flush=True)
+            run_gateway_smoke(image, architecture)
         finally:
             original_error = sys.exception()
             cleanup_errors: list[Exception] = []

@@ -42,7 +42,7 @@ def ignored(signum, frame):
     note("signal-ignored", signum=signum)
 
 def config():
-    path = os.environ.get("OPENCLAW_CONFIG_PATH", "")
+    path = os.environ.get("FAKE_CONFIG", os.environ.get("OPENCLAW_CONFIG_PATH", ""))
     if not os.path.exists(path):
         return None
     with open(path) as source:
@@ -65,8 +65,8 @@ def stat_line(ticks: str) -> bytes:
     return b"1 (tini ) S 99) S " + b" ".join([*[b"0"] * 18, ticks.encode(), *[b"0"] * 30]) + b"\n"
 
 
-def valid_event(boot_id: str = BOOT_ID, ticks: str = TICKS) -> dict[str, str | int]:
-    return {"version": 1, "event": EVENT_NAME, "boot_id": boot_id, "pid1_start_ticks": ticks}
+def valid_event(boot_id: str = BOOT_ID, ticks: str = TICKS, gateway_port: int = 18789) -> dict[str, str | int]:
+    return {"version": 2, "event": EVENT_NAME, "boot_id": boot_id, "pid1_start_ticks": ticks, "gateway_port": gateway_port}
 
 
 def alive(pid: int) -> bool:
@@ -89,7 +89,7 @@ def wait_until(predicate: Callable[[], bool], timeout: float = 10.0) -> None:
 class Readyz:
     """Loopback /readyz server. Tests mutate status, hang and the request hook on purpose."""
 
-    def __init__(self) -> None:
+    def __init__(self, port: int = 0) -> None:
         self.status = 503
         self.hang = False
         self.hits: list[str] = []
@@ -111,7 +111,7 @@ class Readyz:
             def log_message(self, format: str, *args: str | int) -> None:
                 return
 
-        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self._server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
         self._server.daemon_threads = True
         self.port: int = self._server.server_address[1]
         self._thread = threading.Thread(target=self._server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True)
@@ -144,7 +144,7 @@ class Guest:
 
     def write_event(self, payload: bytes | None = None) -> None:
         self.event.parent.mkdir(parents=True, exist_ok=True)
-        self.event.write_bytes(json.dumps(valid_event()).encode() if payload is None else payload)
+        self.event.write_bytes(json.dumps(valid_event(gateway_port=int(self.env["OPENCLAW_GATEWAY_PORT"]))).encode() if payload is None else payload)
 
     def command(self, *arguments: str) -> list[str]:
         return [sys.executable, str(self.helper), *arguments]
