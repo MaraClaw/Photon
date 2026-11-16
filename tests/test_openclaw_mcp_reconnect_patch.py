@@ -58,7 +58,7 @@ def run_patch(package: Path) -> subprocess.CompletedProcess[str]:
 @pytest.fixture
 def package(tmp_path: Path) -> Path:
     (tmp_path / "dist/agents").mkdir(parents=True)
-    (tmp_path / "package.json").write_text(json.dumps({"version": "2026.11.5-beta.3"}), encoding="utf-8")
+    (tmp_path / "package.json").write_text(json.dumps({"version": "2026.11.5-beta.4"}), encoding="utf-8")
     (tmp_path / "dist/agents/agent-bundle-mcp-runtime.js").write_text(SOURCE, encoding="utf-8")
     return tmp_path
 
@@ -107,7 +107,7 @@ def test_patch_refuses_different_openclaw_version(package: Path) -> None:
     result = run_patch(package)
 
     assert result.returncode != 0
-    assert "expected OpenClaw 2026.11.5-beta.3" in result.stderr
+    assert "expected OpenClaw 2026.11.5-beta.4" in result.stderr
     assert (package / "dist/agents/agent-bundle-mcp-runtime.js").read_text(encoding="utf-8") == SOURCE
 
 

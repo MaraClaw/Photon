@@ -20,7 +20,7 @@ from test_openclaw_build_script import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PUBLISH_SCRIPT = REPO_ROOT / "publish-openclaw-local-dockerfile.sh"
-OPENCLAW_VERSION = "2026.11.5-beta.3"
+OPENCLAW_VERSION = "2026.11.5-beta.4"
 
 
 def build_env(bin_dir: Path, log_path: Path, missing_env_file: Path) -> dict[str, str]:
