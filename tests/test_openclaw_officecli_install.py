@@ -79,8 +79,8 @@ def test_pinned_artifacts_install_for_each_target(install_fixture: tuple[Path, d
     assert (root / "npm root/.openclaw/skills/officecli/SKILL.md").stat().st_mode & 0o777 == 0o644
     lines = Path(environment["CURL_LOG"]).read_text().splitlines()
     assert len(lines) == 2
-    assert lines[0].endswith(f"/v1.0.160/{asset}")
-    assert lines[1].endswith("/v1.0.160/SKILL.md")
+    assert lines[0].endswith(f"/v1.0.161/{asset}")
+    assert lines[1].endswith("/v1.0.161/SKILL.md")
     for line in lines:
         assert line.startswith("--disable --config /dev/null ")
         assert "--proto =https --proto-redir =https" in line

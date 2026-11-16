@@ -39,11 +39,14 @@ source paths refer to the daemon host, not automatically to the Python machine.
 Keep Compose globals on its client: `compose_files`, `compose_profiles`,
 `compose_project_name`, `compose_project_directory`, and `compose_env_files`.
 Environment files are applied in order, with later files overriding earlier ones.
+Two newer globals are `compose_all_resources` (a bool, default `False`) and
+`compose_ansi` (`"never"`, `"always"`, `"auto"`, or `None`, which emits nothing).
 
-`environment={"KEY": "value"}` overlays the child's base environment for every
-launch from that client. By default, `inherit_environment=True` copies the
-process environment; `environment=None` adds no overlay. This does not affect
-executable lookup or the parent Python process's own environment.
+`environment={"KEY": "value"}` overlays the child's selected base environment for
+every launch from that client. By default, `inherited_environment_names=None`
+and `inherit_environment=True` copy the process environment;
+`environment=None` adds no overlay. This does not affect executable lookup or
+the parent Python process's own environment.
 
 Keep this CLI configuration distinct from container `envs={...}`. Eligible
 `envs` values use a per-launch child environment with `--env KEY`; CLI-control
@@ -53,7 +56,8 @@ Neither path is a secret vault. See
 including the Compose interpolation caveat.
 
 If passing an existing `client_config=...`, configure that object directly,
-`inherit_environment`, `strict_env_transport`, and `strict_workload_errors` included: the constructor retains it unchanged and
+`inherited_environment_names`, `inherit_environment`, `strict_env_transport`, and
+`strict_workload_errors` included: the constructor retains it unchanged and
 ignores the other constructor options.
 
 ## Isolate The CLI Environment
@@ -67,8 +71,9 @@ client = DockerClient(
 )
 ```
 
-Select an existing authorized context in place of `ci`. With inheritance off,
-the child retains only the available `PATH` and `HOME` entries from the parent,
+Select an existing authorized context in place of `ci`. With inherited names
+left at `None` and inheritance off, the child retains only the available `PATH`
+and `HOME` entries from the parent,
 plus `USERPROFILE` and `SYSTEMROOT` on Windows; Windows names match
 case-insensitively. The explicit client overlay and per-launch overrides are
 applied on top. Ambient `DOCKER_*`, `SSH_AUTH_SOCK`, tokens, and proxy variables
@@ -77,13 +82,46 @@ Executable lookup still uses the Python process's `PATH`, not the overlay.
 Retained home paths can still select Docker configuration and credential helpers;
 this flag controls environment inheritance, not all credential or filesystem access.
 
-The setting covers captured calls, streams, image load/save, and inventory
-capture. Each launch keeps its selected environment; staged inventory reuses its
-frozen group snapshot. Environment-only container/build forwarding checks that
-same effective environment: an ordinary name found only in excluded ambient
-state no longer collides. Reserved CLI names still require literal fallback or
-fail in strict mode. Keep the config stable when using endpoint-bound policy
-objects; changing this compared setting invalidates an existing endpoint binding.
+To select exact ambient names instead, supply a collection:
+
+```python
+client = DockerClient(
+    inherited_environment_names={"PATH", "HOME", "SSH_AUTH_SOCK"},
+    environment={"DOCKER_CONTEXT": "ci"},
+)
+```
+
+This replaces the base selected by either value of `inherit_environment`.
+Only names actually present are inherited; no wildcard or prefix matching is
+performed. `inherited_environment_names=()` inherits no ambient variables, even
+`PATH` or `HOME`. `None` preserves the legacy modes above. Explicit client
+overlays still apply, followed by operation overrides, then mandatory Buildx
+`DOCKER_CLI_EXPERIMENTAL=enabled`, even with empty inheritance.
+
+Construction validates and copies the collection to a `frozenset`, so later
+changes to the original list or set don't change the client. A bare string or
+bytes, a non-collection, or a non-string member raises `TypeError`; empty names
+or names containing `=` or NUL raise `ValueError`. Errors disclose neither
+names nor values. Repeated names select once, and Windows matches selection,
+overlay replacement and collisions case-insensitively. These are environment
+names, not shell patterns or a filesystem access policy.
+
+The settings cover captured calls, streams, image load/save, and inventory
+capture. Selected inheritance is frozen before argv conversion; lazy save does
+this at first iteration, separately from its eager inspection. Staged inventory
+reuses its measured group snapshot across chunks. Container/build forwarding
+checks that same effective environment: an ordinary name found only in excluded
+ambient state no longer collides, but selected names and client-overlay entries
+still do. Reserved CLI names still require literal fallback or fail in strict
+mode. A forwarding decision already bound to a frozen snapshot survives later
+config mutation, including newly invalid settings; independent launches validate
+their current settings. Keep the config stable when using endpoint-bound policy
+objects: changing inherited-name selection invalidates an existing binding.
+
+Executable resolution still uses the Python process's `PATH`, including its
+cached executable prefix. Omitting home or configuration variables doesn't
+confine Docker configuration files, filesystem access, plugins or credential
+helpers. Choose their access separately in the application's runtime.
 
 ## Strict Environment Transport
 
@@ -148,9 +186,11 @@ for result shapes, filters and destructive-timeout handling.
 
 For tables that read many resource properties, use the keyword-only
 `hydrate=True` on `client.container.list`, `client.image.list`,
-`client.network.list`, or `client.volume.list`. `client.ps(hydrate=True)` is the
-container alias. Default listings remain lazy and keep their existing ordering;
-hydrated image listings deduplicate in first-seen CLI order. All return lists.
+`client.network.list`, `client.volume.list`, or the Swarm groups
+`client.node.list`, `client.service.list`, `client.config.list` and
+`client.secret.list`. `client.ps(hydrate=True)` is the container alias. Default
+listings remain lazy and keep their existing ordering; hydrated image listings
+deduplicate in first-seen CLI order. All return lists.
 
 ```python
 from pywhales import DockerClient
@@ -166,9 +206,18 @@ match exact full IDs (exact names for volumes), and vanished resources are
 omitted by re-probing only affected chunks. Other inspection failures propagate.
 Each chunk is its own snapshot, not an atomic snapshot of the whole daemon.
 
+Swarm listings need a manager endpoint; `NotASwarmManager`, timeouts and
+malformed responses propagate rather than producing an empty or partial list.
+`service ls` prints truncated IDs, so a hydrated service listing adds one
+`service inspect --format {{.ID}}` launch per chunk to expand them before the
+snapshot inspect: about three launches for up to 100 services. A node counts as
+removed only when the CLI reports exactly `node <ID> not found` for a requested
+ID; there is no `NoSuchNode` exception.
+
 Hydrated properties keep their pinned snapshots until a successful explicit
-`reload()` or a mutation through that handle releases the pin. A failed mutation
-launch also releases it. Mutating by a plain name or through another handle
+`reload()` or a mutation through that handle releases the pin, including Swarm
+node update/promote/demote/remove, service update/scale/rollback/remove, and
+config and secret remove. A failed mutation launch also releases it. Mutating by a plain name or through another handle
 doesn't invalidate this instance; call `reload()` when fresh state is needed.
 Container context cleanup refreshes formerly pinned state before stopping or
 removing, so use context management only for resources the application owns.
@@ -245,6 +294,75 @@ outcomes are unchanged. The originating config is snapshotted per launch, so
 later mutations don't change a stream already running. Check installed support
 as described in [Usage validation](validation.md).
 
+## Docker CLI 29 Surface Changes
+
+### Root aliases and groups
+
+`DockerClient` has the root aliases `docker.events` (`system.events`, a
+`MappedProcessStream[DockerEvent]`), `docker.port` (`container.port`),
+`docker.history` (`image.history`), and `docker.search` (`image.search`). It also
+has a `checkpoint` command group; see
+[Checkpoints](containers-and-output.md#checkpoints).
+
+### Removed and rejected options
+
+The `trust` command group is gone, so `DockerClient.trust` doesn't exist: Docker
+CLI 29 removed `docker trust`. Container `create` and `run` lost `content_trust`
+and `kernel_memory`, `update` lost `kernel_memory`, and `run` lost
+`service_ports`; passing one raises `TypeError`. Plugin `install`, `push`, and `upgrade` still accept
+`disable_content_trust`, but the default `True` is a no-op and `False` raises
+`ValueError`.
+
+`context.create(...)` keeps `kubernetes` and `default_stack_orchestrator` for
+positional compatibility and raises `ValueError` before any launch unless both
+are `None`, because CLI 29 removed Kubernetes contexts. Context handling also
+has `context.show()` (a `str`), `context.export(context, output=None, *,
+timeout=None)`, `context.import_(name, source, *, timeout=None)` (a `Context`),
+and `context.update(context, description=None, docker=None)` (a `Context`), with
+the handle method `Context.update(description=None, docker=None)`. Export and
+import need a real file; a path of `-` raises `ValueError`.
+
+### Raw-text option results
+
+Some options return the CLI's human-readable text as `str` instead of parsed
+objects. Each is a keyword-only flag with `Literal` overloads, and the text is
+never parsed or cached:
+
+- `pretty=True` on config, secret, node, and service `inspect`.
+- `verbose=True` on `system.disk_free`, `network.inspect`, `manifest.inspect`,
+  and `buildx.disk_usage`.
+- `tree=True` on `image.list`, which rejects `hydrate=True`.
+- Buildx `debug=True` on `list`, `inspect`, `disk_usage`, `history.list`,
+  `history.inspect`, and `imagetools.inspect`, which returns stdout, a newline,
+  then the stderr debug log.
+
+Omitted or `False` keeps the usual typed result. Check the overload before
+assuming a handle or model comes back.
+
+### Other command groups
+
+The remaining groups gained CLI 29 options too. Confirm each against the installed
+signature; notable entry points are:
+
+- `volume.update(volume, *, availability, timeout=None)` and `Volume.update`,
+  cluster options on `volume.create`, `volume.list(cluster=True)`, and `force` on
+  `volume.remove`. Cluster volume handles keep their `cluster_volume` payload.
+- Network `connect(gw_priority=..., link_local_ips=...)`, `create(config_from=...,
+  config_only=..., ingress=..., ipv4=..., scope=...)`, and `remove(force=...)`.
+- `service.create` and `service.update` cover the CLI 29 option set, including
+  long-form `publish` mappings and `--*-add`/`--*-rm` pairs such as `env_add`,
+  `label_add`, and `publish_rm`. `task.logs(task, ...)` has the `service.logs`
+  overloads and returns `str` or an owned `ProcessStream`.
+- `filters` on `node.list`, and keyword-only `filters` on `service.ps`, `node.ps`, `stack.ps`, and
+  `stack.services`; `stack.config(compose_files, *, skip_interpolation=False)`
+  returns `str`; `stack.deploy` takes `detach` (`None`, `True`, or `False`) and `quiet`, and
+  `stack.remove` takes `detach`.
+- `swarm.init` takes `default_addr_pools`, `default_addr_pool_mask_length`,
+  `force_new_cluster`, `cert_expiry`, `dispatcher_heartbeat`, `external_ca`,
+  `max_snapshots`, `snapshot_interval`, and `task_history_limit`, and
+  `swarm.update(external_ca=...)` now emits `--external-ca`.
+- `manifest.push(..., insecure=...)` and `plugin.list(filters=None)`.
+
 ## Troubleshooting Without Credential Leaks
 
 `PYWHALES_DEBUG=1` enables execution diagnostics, with command and environment
@@ -291,7 +409,7 @@ For one shared allowance over managed pipe reads and stdin writes, set
 `InspectionPolicy.max_total_io_bytes` inside `observation()`, not on the client.
 This adds to separate response/stream/stdin limits and doesn't bound file contents
 transferred by CLI filename arguments. For closed stop attribution and exporter
-offer counts, inspect schema-10 telemetry support as described in
+offer counts, inspect schema-11 telemetry support as described in
 [Usage validation](validation.md).
 
 Application policy APIs also require explicit imports from `pywhales.profiles`,

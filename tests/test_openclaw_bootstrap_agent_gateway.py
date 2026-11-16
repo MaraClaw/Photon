@@ -22,7 +22,7 @@ TIMEOUT = "OPENCLAW_BOOTSTRAP_TIMEOUT_SECONDS"
 PORT = "OPENCLAW_GATEWAY_PORT"
 CONFIG = "OPENCLAW_CONFIG_PATH"
 ENGINE_CONFIG = {"gateway": {"mode": "local"}, "skills": {"load": {"extraDirs": ["/home/node/.openclaw/skills"]}}}
-TRACELATTICE = {"command": "/usr/local/bin/tracelattice", "transport": "stdio"}
+TRACELATTICE = {"command": "/usr/local/bin/tracelattice", "transport": "stdio", "enabled": True}
 DISABLED = json.dumps({"mcp": {"servers": {"tracelattice": {"enabled": False}}}})
 
 

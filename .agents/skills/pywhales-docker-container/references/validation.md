@@ -28,10 +28,14 @@ lifecycle guidance in the relevant reference rather than copying an example
 from another Docker library. Client construction and introspection don't
 establish daemon or plugin availability.
 
-The guidance describes source APIs for project version 1.2.0.
-An installed version string alone isn't proof of support. Check environment
-inheritance, node and standalone targets, completion/restart/failure keywords, strict workload
-errors, schema-10 stop attribution and exporter counts, refusal/admission correlation,
+The guidance describes source APIs for project version 1.3.0.
+An installed version string alone isn't proof of support. Check Docker CLI 29
+additions (the checkpoint group, raw-text flags, Buildx history and policy,
+Compose stats and wait), inherited
+environment selection, archive stderr allowances, Swarm hydrated listings,
+reconciliation lease renewal, node and standalone targets,
+completion/restart/failure keywords, strict workload
+errors, schema-11 stop attribution and exporter counts, refusal/admission correlation,
 owner active and class/owner queued demand, shared IO and launch-attempt/child-slot
 limits, startup health intervals and profile approvals,
 optional manager leadership, prune deadlines, stdin policy fields, inventory kinds, and typed stream returns
@@ -65,7 +69,7 @@ from pywhales.convergence import (
 )
 from pywhales.inventory import InventoryKind
 from pywhales.profiles import CONTROLS, CreateRequest, RuntimePolicy, SecurityProfile
-from pywhales.reconciliation import ConvergenceSummary
+from pywhales.reconciliation import ActionContext, ConvergenceSummary, JournalStore
 from pywhales.telemetry import (
     AdmissionDecisionRecord,
     AdmissionOutcome,
@@ -83,7 +87,7 @@ print(signature(wait_for_convergence, annotation_format=Format.STRING))
 print([f.name for f in fields(ContainerTarget)])
 print([f.name for f in fields(NodeTarget)])  # includes require_leader
 print({f.name: f.default for f in fields(NodeTarget)}["require_leader"])  # False
-print(signature(InspectionPolicy))  # includes max_total_io_bytes=None
+print(signature(InspectionPolicy))  # includes max_total_archive_stderr_bytes=None
 print(signature(ClassLimit))  # pending_demand_capacity: int | None = None
 print([f.name for f in fields(OutcomeCounts)])  # includes rejected_owner_demand_full
 print(RejectionReason.OWNER_DEMAND_FULL.value)  # owner_demand_full
@@ -97,6 +101,8 @@ for target_type in (ComposeTarget, ContainerTarget):
     )  # False
 print(get_annotations(Failure, format=Format.STRING)["reason"])  # unhealthy
 print(get_args(ConvergenceSummary.__value__))  # includes unhealthy
+print(signature(ActionContext.renew_lease))  # (self, ttl: float) -> None
+print(hasattr(JournalStore, "renew"))  # True: custom stores must implement it
 print(signature(CreateRequest))  # health_start_interval: int | None = None
 print(signature(SecurityProfile))  # max_health_start_interval: int | None = None
 print(signature(RuntimePolicy))  # operator-declared supported_controls
@@ -113,13 +119,15 @@ print(signature(DockerClient).parameters["strict_env_transport"])  # bool = Fals
 print({f.name: f.default for f in fields(ClientConfig)}["strict_env_transport"])
 print(signature(DockerClient).parameters["inherit_environment"])  # bool = True
 print({f.name: f.default for f in fields(ClientConfig)}["inherit_environment"])
+print(signature(DockerClient).parameters["inherited_environment_names"])  # None
+print({f.name: f.default for f in fields(ClientConfig)}["inherited_environment_names"])
 print(signature(DockerClient).parameters["strict_workload_errors"])  # bool = False
 print({f.name: f.default for f in fields(ClientConfig)}["strict_workload_errors"])
 print(signature(AdmissionOwner, annotation_format=Format.STRING))  # both owner caps
 print([f.name for f in fields(AdmissionDecisionRecord)])
 print([f.name for f in fields(LaunchRecord)])  # includes admission_id
 print([f.name for f in fields(RefusalRecord)])  # no execution measurements
-print(get_args(StopReason.__value__))  # closed reasons, including total_io
+print(get_args(StopReason.__value__))  # closed reasons, including buffer limits
 for record_type in (CompletionRecord, RefusalRecord):
     print(signature(record_type).parameters["stop_reason"])  # None, keyword-only
     print(next(f.kw_only for f in fields(record_type) if f.name == "stop_reason"))
@@ -134,8 +142,15 @@ for record_type in (
     print(
         record_type.__name__,
         {f.name: f.default for f in fields(record_type)}["schema_version"],
-    )  # schema_version must be 10 for all four record types
+    )  # schema_version must be 11 for all four record types
 print(get_annotations(ServiceTarget, format=Format.STRING)["mode"])  # job modes?
+print(hasattr(docker, "checkpoint"))  # True; the engine still needs CRIU
+print(hasattr(docker, "trust"))  # False: removed with Docker CLI 29
+print(signature(docker.buildx.history.list, annotation_format=Format.STRING))
+print(signature(docker.checkpoint.create, annotation_format=Format.STRING))
+print(signature(docker.compose.stats, annotation_format=Format.STRING))
+print(signature(DockerClient).parameters["compose_all_resources"])  # bool = False
+print(signature(DockerClient).parameters["compose_ansi"])  # defaults to None
 
 methods = [
     getattr(docker.compose, name)
@@ -148,8 +163,10 @@ methods = [
         "pull",
         "run",
         "start",
+        "stats",
         "stop",
         "up",
+        "wait",
     )
 ]
 methods += [
@@ -158,6 +175,10 @@ methods += [
     docker.image.list,
     docker.network.list,
     docker.volume.list,
+    docker.node.list,
+    docker.service.list,
+    docker.config.list,
+    docker.secret.list,
     docker.create,
     docker.run,
     docker.container.create,
@@ -169,6 +190,11 @@ methods += [
     docker.volume.prune,
     docker.system.prune,
     docker.service.logs,
+    docker.container.port,
+    docker.config.inspect,
+    docker.image.list,
+    docker.system.disk_free,
+    docker.buildx.disk_usage,
 ]
 for method in methods:
     print(method.__qualname__, signature(method, annotation_format=Format.STRING))
@@ -176,8 +202,9 @@ for method in methods:
         print(signature(overload, annotation_format=Format.STRING))
 ```
 
-Look for keyword-only `hydrate: bool = False` on the four resource `list`
-methods and the `docker.ps` alias. A signature proves argument support, not
+Look for keyword-only `hydrate: bool = False` on the eight resource `list`
+methods (container, image, network, volume, node, service, config, secret) and
+the `docker.ps` alias. A signature proves argument support, not
 snapshot or fanout behavior: follow the linked lifecycle and observation
 contracts, then validate the smallest authorized runtime scenario.
 
@@ -203,6 +230,14 @@ Look for `completion_services: tuple[str, ...] = ()` on `capture_compose`, and
   filename-transferred archive contents. Captured input still needs an explicit
   stdin cap. Check matching documentation as well as the field; see
   [Sharing one IO budget](observation-and-convergence.md#sharing-one-io-budget).
+- `max_total_archive_stderr_bytes: int | None = None` on `InspectionPolicy`:
+  positive exact integers (not bools) bound actual direct-archive stderr reads,
+  including post-reap reads, through shared nested/copied accounts retained after
+  launch. Check matching documentation for concurrent load output/paused-save
+  diagnostic draining, exact EOF, one detection byte, cleanup and overflow before
+  truncated classification. The exception reason is `total_archive_stderr`, but
+  telemetry uses existing `other_limit`; this field adds no schema or reason.
+  See [Bound archive diagnostics](registry-and-archives.md#bound-archive-diagnostics).
 - `pending_demand_capacity: int | None = None` on `ClassLimit`: nonnegative exact
   integers bound queued demand only; zero still permits immediate grants.
   `OutcomeCounts.rejected_pending_demand_full` and `AdmissionOutcome`'s
@@ -234,7 +269,17 @@ Look for `completion_services: tuple[str, ...] = ()` on `capture_compose`, and
   installed documentation describes attached workload failures, not every CLI
   error; detached and preflight specialization remains separate.
 - `inherit_environment: bool = True` on both client types; false restricts the
-  child base before overlays, independently of strict assignment transport.
+  child base before overlays when inherited names are unset, independently of
+  strict assignment transport.
+- Keyword-only `inherited_environment_names: Collection[str] | None = None` on
+  `DockerClient`, and the matching `ClientConfig` field appended after
+  `strict_workload_errors`. `None` keeps legacy selection; a supplied collection
+  overrides it and empty inherits nothing. Construction copies validated names
+  to a `frozenset`, rejects a bare string and discloses no invalid input. Check
+  documented overlay precedence, Windows equivalence, frozen collision checks,
+  endpoint invalidation and unchanged process-PATH lookup, rather than inferring
+  those behaviors from the keyword. See
+  [CLI environment isolation](client-and-errors.md#isolate-the-cli-environment).
 - `fail_on_exit: bool = False` on both `capture_compose` and `capture_containers`,
   frozen on `ComposeTarget` and `ContainerTarget`. Check matching documentation
   for cause-free `Failure(reason="exited")`, completion precedence, and restart
@@ -253,7 +298,7 @@ Look for `completion_services: tuple[str, ...] = ()` on `capture_compose`, and
 - Keyword-only `telemetry_observer` on `AdmissionOwner`, plus
   `AdmissionDecisionRecord`, `AdmissionId`, and `AdmissionOutcome` exports from
   `pywhales.telemetry`. Inspect the record fields and `TelemetryRecord` union;
-  schema-10 records include `owner_demand_full` in the extended admission
+  schema-11 records include `owner_demand_full` in the extended admission
   outcome vocabulary. Launch and refusal records have `admission_id`, while completion records join by
   `attempt_id`. `RefusalRecord` has `phase="refusal"` and only `cancelled`,
   `timeout`, or `limit` outcomes, without duration, byte counts or return code.
@@ -261,10 +306,12 @@ Look for `completion_services: tuple[str, ...] = ()` on `capture_compose`, and
   just the client's launch observer. See [Telemetry and admission](telemetry-and-admission.md#measure-admission-waits-and-correlate-launches).
 - Keyword-only `stop_reason: StopReason | None = None` on both `CompletionRecord`
   and `RefusalRecord`, with `StopReason` exported by `pywhales.telemetry` and
-  schema version 10 on all four record types. Closed reasons distinguish command
-  and scope timeouts, cancellation and known limits (including `total_io`);
-  unknown limit text maps to `other_limit`. The selected reason survives cleanup
-  and close, and ordinary failures, success and unstopped close use `None`.
+  schema version 11 on all four record types. Closed reasons distinguish command
+  and scope timeouts, cancellation and known limits, including `total_io`,
+  `buffer_output_record` and `buffer_stderr_history`. `StreamBufferLimitError`
+  has outcome `limit`; ordinary builtin `BufferError` has `failure` and no reason.
+  Unknown observation limit text maps to `other_limit`. The selected reason survives
+  cleanup and close, and ordinary failures, success and unstopped close use `None`.
   `BoundedExporter.stop_reason_counts` must accompany this: immutable detached
   fixed-key snapshots count every reason-bearing completion/refusal offer,
   including overflow, shutdown and repeated offers, without flush recounting.
@@ -297,6 +344,22 @@ Look for `completion_services: tuple[str, ...] = ()` on `capture_compose`, and
   positive exact integer seconds only, require explicit ceiling approval and
   the conditional `health_start_interval` runtime control, and keep `CONTROLS`
   unchanged. See [Startup health intervals and profiles](containers-and-output.md#startup-health-interval-and-approved-profiles).
+- `hasattr(docker, "checkpoint")` true and `hasattr(docker, "trust")` false. The
+  group's presence doesn't prove the daemon is experimental with CRIU, and
+  `container.port` should return `list[PublishedPort]`. See
+  [Docker CLI 29 container changes](containers-and-output.md#docker-cli-29-container-changes).
+- Keyword-only raw-text flags that default to `False`: `pretty` on config, secret,
+  node, and service `inspect`; `verbose` on `system.disk_free`, `network.inspect`,
+  `manifest.inspect`, and `buildx.disk_usage`; `tree` on `image.list`; and Buildx
+  `debug`. Each needs a `Literal[True]` overload returning `str`; the loop above
+  prints them for config `inspect`, `disk_free`, `image.list`, and `disk_usage`,
+  so add other methods the same way. See
+  [Raw-text option results](client-and-errors.md#raw-text-option-results).
+- `compose_all_resources: bool = False` and
+  `compose_ansi: Literal["never", "always", "auto"] | None = None` on `DockerClient`,
+  plus the `docker.buildx.history`, `docker.buildx.policy`,
+  `docker.buildx.replay`, and `docker.buildx.dap` sub-CLIs. A missing attribute
+  means this installed capability isn't available.
 
 Optional `None` results still need a guard before context entry. A missing
 import, keyword, kind, or annotation means this installed capability isn't
@@ -364,7 +427,8 @@ contributor tests. A version string alone doesn't establish supported arguments
 or return contracts.
 
 Checking `default_timeout`, `telemetry_observer`, `environment`,
-`strict_env_transport`, `strict_workload_errors`, or `inherit_environment` follows the same signature-first rule: confirm it in
+`strict_env_transport`, `strict_workload_errors`, `inherit_environment`, or
+`inherited_environment_names` follows the same signature-first rule: confirm it in
 `signature(DockerClient)` before assuming it is supported. Opt-in admission
 (`pywhales.admission`), bounded observation (the root `observation`,
 `capture_inventory`, and `InspectionPolicy` exports, plus `bulk_reload` from

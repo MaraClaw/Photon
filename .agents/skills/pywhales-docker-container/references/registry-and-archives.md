@@ -58,6 +58,9 @@ Streaming starts eagerly for one unique reference; for several, workers start
 on first consumption of the stream, not at construction or context entry, and
 at most four concurrent transfers run at once. A bare loop `break` doesn't
 close the stream; exhaust it, use its context manager, or call `close()`.
+A dropped stream is closed only after garbage collection; an unclosed
+multi-reference stream doesn't delay interpreter exit, but its local CLIs
+aren't reaped then.
 For a multi-reference stream, the first worker's error stops sibling and
 queued transfers without waiting for further consumption; that error is
 delivered once through iteration, including after an explicit `close()`.
@@ -121,7 +124,7 @@ with closing(docker.save("alpine:3.22")) as chunks:
             output.write(chunk)
 ```
 
-`save(images, output=None, *, timeout=None)` validates the deadline and rejects
+`save(images, output=None, *, timeout=None, platform=None)` validates the deadline and rejects
 empty input, then inspects every requested image eagerly, raising
 `NoSuchImage` for a missing one before starting the save CLI. An
 explicit `output` path blocks and returns `None`. Omitted `output` returns a
@@ -133,7 +136,7 @@ telemetry starts. The eager inspection can still emit its own telemetry.
 Closing a started generator kills a still-running local save CLI, reaps it, and
 joins its accounting thread. It doesn't undo daemon-side work.
 
-`load(input, quiet=False, *, timeout=None)` accepts a path, complete bytes, or
+`load(input, quiet=False, *, timeout=None, platform=None)` accepts a path, complete bytes, or
 an iterator of byte chunks. Path input runs an eager, process-backed progress stream,
 printing decoded lines unless `quiet=True`. Byte or iterator input is written
 to a local CLI's own stdin and fully consumed during the call; these archive
@@ -165,6 +168,7 @@ policy = InspectionPolicy(
     max_response_bytes=1_048_576,
     max_total_stdin_bytes=64 * 1024 * 1024,
     max_total_io_bytes=80 * 1024 * 1024,
+    max_total_archive_stderr_bytes=64 * 1024,
 )
 with open("alpine.tar", "rb") as archive, observation(policy):
     tags = docker.load(iter(lambda: archive.read(65_536), b""), timeout=60)
@@ -177,21 +181,23 @@ leaves archive uploads unbounded unless an enclosing scope supplies a limit.
 Further nonempty input raises `ObservationLimitError` with `reason="total_stdin"`
 after local CLI cleanup, without sending bytes beyond the budget. Uploads retain
 their launch-time accounts after scope exit. Output is accounted separately:
-direct archive reads use `max_total_stream_bytes`, not the captured-response
+direct archive stdout reads use `max_total_stream_bytes`, not the captured-response
 total. Path-based `load("alpine.tar")` lets the CLI read the file itself, so it
 doesn't charge an upload stdin budget.
 
 The example also sets `max_total_io_bytes`, an optional positive exact integer
-shared by upload writes, caller-thread archive stdout/stderr reads, and other
-captured/stream reads or managed stdin writes in the same observation. Every
+shared by upload writes, archive stdout reads, and other captured/stream reads
+or managed stdin writes in the same observation. Every
 enclosing account is charged atomically, including across copied contexts, and
 launched transfers retain it after scope exit. It adds to the separate stdin,
 stream, and response caps. Exact-budget EOF succeeds; an output read may take one
 detection byte before `ObservationLimitError(reason="total_io")`, after which no
 further spending is allowed. Writes never send beyond either allowance, and
-source-specific limits win ties. Cleanup/watchdog drains and post-exit stderr
-used for Docker-error classification don't spend IO. Filename-based archive
-contents and direct/inherited stream stdin are excluded, while their managed
+source-specific limits win ties. With the diagnostic allowance enabled, load
+stdout is read during upload and still spends stream and IO budgets; stderr
+spends its separate diagnostic budget below. Legacy cleanup/watchdog drains and
+post-exit stderr used for Docker-error classification don't spend IO.
+Filename-based archive contents and direct/inherited stream stdin are excluded, while their managed
 progress output still counts. IO alone does not enable captured input: that
 still needs `max_total_stdin_bytes`. See
 [Sharing one IO budget](observation-and-convergence.md#sharing-one-io-budget).
@@ -200,6 +206,42 @@ Use cooperative chunk producers: deadlines and cancellation can reap the local
 CLI but cannot interrupt arbitrary Python code inside the input iterator. For
 nested limits and observation exceptions, see
 [Observation budgets and convergence](observation-and-convergence.md).
+
+## Bound Archive Diagnostics
+
+The example's `max_total_archive_stderr_bytes` separately bounds actual stderr
+read by direct byte/iterator `load()` and lazy byte `save()`, including reads
+after the local child is reaped. It is `None` by default or a positive exact
+integer, never a bool. `None` keeps legacy behavior unless an enclosing
+observation supplies a bound. This is an `InspectionPolicy` field, not a client
+or `load`/`save` keyword and not the `raw_diagnostics` rendering switch.
+
+Opting in captures load stderr and drains both load output pipes concurrently
+with upload, so noisy output doesn't block stdin progress. Save drains stderr
+independently while the caller pauses archive stdout consumption. Every enclosing
+diagnostic account is checked and charged atomically; nested scopes and copied
+contexts share outer consumption. A lazy save binds at first iteration, and
+started transfers keep their accounts after scope exit. Filename-based transfers
+keep their ordinary captured/stream budgets and aren't direct archives.
+
+Exact-limit stderr EOF succeeds. At most one shared detection byte beyond the
+tightest allowance is read, then `ObservationLimitError` with
+`reason="total_archive_stderr"` stops the transfer. No later diagnostic read
+spends that overflowed account, and retained stderr excludes the detection byte.
+The local CLI is killed/reaped as needed, pipes close, and owned workers join
+before the error is delivered. This doesn't interrupt arbitrary caller iterator
+code or roll back daemon work. Resume or close a paused save generator to
+receive a recorded error, and keep upload producers cooperative.
+
+When stderr fits, failed load retains raw stderr on `DockerException`; save
+preserves its existing `NoSuchImage` classification and raw stderr. Overflow wins
+before truncated stderr can select a Docker exception. Direct-archive stderr
+uses this separate allowance, including post-reap diagnostics, rather than
+stream or aggregate IO budgets. Unset allowances keep legacy inherited load
+stderr and post-exit save classification outside those totals. Archive payload
+and retained load stdout need their own limits; this isn't a total-memory cap.
+Telemetry reports outcome `limit` and existing reason `other_limit`, without
+adding a schema field or a `total_archive_stderr` counter key.
 
 ## Telemetry Families
 
@@ -210,7 +252,7 @@ pull/push progress streams report under the regular `captured`/`stream`
 families instead. See
 [Telemetry and admission](telemetry-and-admission.md) for the full schema.
 
-Schema-10 observation preflight refusals use those same families, emit no
+Schema-11 observation preflight refusals use those same families, emit no
 launch/completion pair, and preserve the original exception without starting a
 child or reading upload input. A lazy save checks and can emit its refusal at
 first iteration, not construction; eager inspection is a separate captured
@@ -251,3 +293,46 @@ explicit value gives each helper launch its own deadline, including inspection,
 pull, temporary-container creation, copy, commit when needed, and cleanup. It
 isn't one total operation budget. `copy_from` returns `None`; `copy_to` commits
 and returns a new `Image`, leaving the original image unchanged.
+
+## History, Search, And Platform Selection
+
+```python
+from pywhales import DockerClient
+
+docker = DockerClient()
+for layer in docker.history("alpine:3.22"):
+    print(layer.created_by, layer.size)
+for result in docker.search("alpine", limit=5):
+    print(result.name, result.star_count)
+```
+
+`image.history(image, *, platform=None, timeout=None)` returns
+`list[ImageHistoryLayer]`, newest layer first. `Image.history()` and the root
+alias `docker.history` mirror it. A layer has `id` (`None` when Docker reports
+`<missing>`), `created_at`, `created_by`, `size` in bytes, and `comment`. A
+missing image raises `NoSuchImage`.
+
+`image.search(term, *, filters=None, limit=None, timeout=None)` and the root
+alias `docker.search` return `list[ImageSearchResult]` with `name`,
+`description`, `is_official`, and `star_count`. The call needs registry access.
+`filters` is a mapping or string pairs, and the typed keys are `is-official` and
+`stars`. Both methods take a local CLI `timeout`.
+
+`image.list(tree=True)` returns the CLI's tree text as an unparsed `str`, not
+`Image` handles, and rejects `hydrate=True`. See
+[raw-text option results](client-and-errors.md#raw-text-option-results).
+
+`pull` and `push` accept keyword-only `all_tags=True` to transfer every tag of
+one repository. `x` must be a single string with no tag or digest, or the call
+raises `ValueError` before any lookup. It's one transfer with no fanout: the
+blocking call returns `None` instead of handles, and `stream_logs=True` returns
+the stream. `push(..., all_tags=True)` skips the local-image preflight described
+above, so the CLI reports a missing repository.
+
+`platform` selects a platform manifest. `push` and `inspect` take one string;
+`load`, `save`, and `remove` take a string or an iterable of strings, sent as
+repeated `--platform` options. `pull` already took one string.
+`inspect(..., platform=...)` returns `ImageInspectResult` snapshots (one for a
+string, a list for an iterable), not `Image` handles, because a platform
+manifest's own ID can't be reloaded. An image-ID reference can't match its
+platform snapshot and raises `ParsingError`.
