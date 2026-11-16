@@ -33,17 +33,17 @@ def wait_probed(readyz: Readyz, count: int = 3) -> None:
 
 def test_event_is_published_after_readyz_and_removed_with_the_gateway(guest: Guest, readyz: Readyz) -> None:
     guest.write_event()  # leftover that would still match this guest's identity
-    with guest.running(*GATEWAY, "--flag", "value", "", FAKE_TERM_EXIT="9") as helper:
+    with guest.running(*GATEWAY, "--token", "value", "--password", "", FAKE_TERM_EXIT="9") as helper:
         guest.wait_started()
         wait_probed(readyz)
         start = guest.starts()[0]
-        assert start["argv"] == ["gateway", "--flag", "value", ""]
+        assert start["argv"] == ["gateway", "--token", "value", "--password", ""]
         assert start["stale_event"] is False
         assert not guest.event.exists()
         assert helper.poll() is None
         readyz.status = 200
         wait_until(guest.event.exists)
-        assert json.loads(guest.event.read_bytes()) == valid_event()
+        assert json.loads(guest.event.read_bytes()) == valid_event(gateway_port=readyz.port)
         assert guest.run("check-ready").returncode == 0
         assert [entry.name for entry in guest.event.parent.iterdir()] == [guest.event.name]
         os.kill(helper.pid, signal.SIGTERM)
@@ -71,7 +71,7 @@ def test_event_published_by_a_previous_run_cannot_authorize_the_next_run(guest: 
         assert guest.starts()[0]["stale_event"] is False
         assert guest.run("check-ready").returncode == 75
         readyz.status = 200
-        wait_until(lambda: guest.event.exists() and json.loads(guest.event.read_bytes()) == valid_event(ticks="9007199254740994"))
+        wait_until(lambda: guest.event.exists() and json.loads(guest.event.read_bytes()) == valid_event(ticks="9007199254740994", gateway_port=readyz.port))
         assert guest.run("check-ready").returncode == 0
 
 
@@ -84,7 +84,7 @@ def test_publication_replaces_the_event_file_instead_of_rewriting_it(guest: Gues
             readyz.status = 200
             wait_until(lambda: guest.event.read_bytes().startswith(b"{\"version\""))
             assert earlier.read() == b"written by something else after startup"
-        assert json.loads(guest.event.read_bytes()) == valid_event()
+        assert json.loads(guest.event.read_bytes()) == valid_event(gateway_port=readyz.port)
 
 
 PRE_READY = {
@@ -184,16 +184,26 @@ def test_invalid_policy_blocks_gateway_launch(guest: Guest, readyz: Readyz, sett
 
 
 @pytest.mark.parametrize("style", ["separate", "equals"])
-def test_port_flag_takes_precedence_over_the_environment(guest: Guest, readyz: Readyz, style: str) -> None:
+def test_port_flag_is_persisted_for_fresh_process_readiness_without_probing_environment(guest: Guest, readyz: Readyz, style: str) -> None:
     flag = ("--port", str(readyz.port)) if style == "separate" else (f"--port={readyz.port}",)
-    with guest.running(*GATEWAY, *flag, **{PORT: "1"}) as helper:
-        guest.wait_started()
-        readyz.status = 200
-        wait_until(guest.event.exists)
-        assert helper.poll() is None
+    wrong = Readyz()
+    wrong.status = readyz.status = 200
+    try:
+        with guest.running(*GATEWAY, *flag, **{PORT: str(wrong.port)}) as helper:
+            guest.wait_started()
+            wait_until(guest.event.exists)
+            assert json.loads(guest.event.read_bytes()) == valid_event(gateway_port=readyz.port)
+            before = len(readyz.hits)
+            assert guest.run("check-ready", env={PORT: str(wrong.port)}).returncode == 0
+            assert len(readyz.hits) == before + 1
+            assert guest.run("check-ready", env={PORT: "not a port"}).returncode == 0
+            assert wrong.hits == []
+            assert helper.poll() is None
+    finally:
+        wrong.close()
 
 
-@pytest.mark.parametrize("flag", [("--port",), ("--port=",), ("--port=abc",), ("--port", "70000")])
+@pytest.mark.parametrize("flag", [("--port=",), ("--port=abc",), ("--port", "70000")])
 def test_invalid_port_flag_blocks_gateway_launch(guest: Guest, flag: tuple[str, ...]) -> None:
     assert guest.run(*GATEWAY, *flag).returncode == 2
     assert not guest.log.exists()
@@ -241,3 +251,148 @@ def test_invalid_policy_leaves_the_config_untouched(guest: Guest, environment: d
     config.write_text("{}")
     assert guest.run(*GATEWAY, env=environment | {CONFIG: str(config)}).returncode == 2
     assert config.read_text() == "{}"
+
+
+SERVER_ARGUMENTS = [
+    ("--no-color", "gateway"),
+    ("--dev", "gateway", "run"),
+    ("--profile", "Review", "gateway"),
+    ("--profile=Review", "--no-color", "gateway", "run"),
+    ("--log-level", "debug", "gateway"),
+    ("--log-level=debug", "gateway", "run"),
+    ("--container", "agent", "gateway"),
+    ("--container=agent", "gateway"),
+    ("gateway", "--profile", "Review", "run"),
+    ("gateway", "--dev", "run"),
+    ("gateway", "--token", "status"),
+    ("gateway", "--password", "stop", "run"),
+    ("gateway", "--token", "--port", "run"),
+    ("gateway", "--task-supervisor", "run"),
+    ("gateway", "--task-supervisor-child", "status", "run"),
+    ("--", "gateway", "run"),
+    ("gateway", "--", "run"),
+]
+
+
+@pytest.mark.parametrize("arguments", SERVER_ARGUMENTS)
+def test_root_and_gateway_option_roles_supervise_only_the_server(guest: Guest, readyz: Readyz, arguments: tuple[str, ...]) -> None:
+    guest.write_event()
+    with guest.running("openclaw", *arguments) as helper:
+        guest.wait_started()
+        wait_probed(readyz, 1)
+        assert guest.starts()[0]["argv"] == list(arguments)
+        assert guest.starts()[0]["stale_event"] is False
+        assert not guest.event.exists()
+        readyz.status = 200
+        wait_until(guest.event.exists)
+        assert json.loads(guest.event.read_bytes()) == valid_event(gateway_port=readyz.port)
+        assert guest.run("check-ready").returncode == 0
+        assert helper.poll() is None
+
+
+PROFILE_SELECTIONS = [
+    (("--profile", "Review"), "Review", "default", {}),
+    (("--profile= Review ",), "Review", "default", {}),
+    (("--dev",), "dev", "default", {}),
+    (("--profile", "DEFAULT"), "DEFAULT", "Review", {}),
+    (("--profile", "Review"), "Review", "default", {"OPENCLAW_STATE_DIR": "canonical"}),
+    (("--profile", "Review"), "Review", "default", {"OPENCLAW_CONFIG_PATH": "canonical"}),
+    (("--profile", "Review"), "Review", "default", {"OPENCLAW_STATE_DIR": "canonical", "OPENCLAW_CONFIG_PATH": "canonical"}),
+    (("--profile", "Review"), "Review", "default", {"OPENCLAW_STATE_DIR": "custom"}),
+    (("--profile", "Review"), "Review", "default", {"OPENCLAW_CONFIG_PATH": "custom"}),
+    (("--profile", "Review"), "Review", "default", {"OPENCLAW_STATE_DIR": "custom", "OPENCLAW_CONFIG_PATH": "custom"}),
+    (("--profile", "Review"), "Review", "default", {"OPENCLAW_STATE_DIR": "custom", "OPENCLAW_CONFIG_PATH": "canonical"}),
+]
+
+
+@pytest.mark.parametrize("options,selected,previous,overrides", PROFILE_SELECTIONS)
+def test_root_profile_registration_uses_upstream_override_precedence_before_first_config_load(
+    guest: Guest, readyz: Readyz, options: tuple[str, ...], selected: str, previous: str, overrides: dict[str, str],
+) -> None:
+    home = guest.root / "home"
+    previous_root = home / (".openclaw" if previous.lower() == "default" else f".openclaw-{previous}")
+    selected_root = home / (".openclaw" if selected.lower() == "default" else f".openclaw-{selected}")
+    custom_state = guest.root / "custom state"
+    custom_config = guest.root / "custom config.json"
+    configs = {previous_root / "openclaw.json", selected_root / "openclaw.json", custom_state / "openclaw.json", custom_config}
+    for path in configs:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}")
+    environment = {"OPENCLAW_PROFILE": previous}
+    for key, kind in overrides.items():
+        canonical = previous_root if key == "OPENCLAW_STATE_DIR" else previous_root / "openclaw.json"
+        custom = custom_state if key == "OPENCLAW_STATE_DIR" else custom_config
+        environment[key] = str(canonical if kind == "canonical" else custom)
+    if overrides.get(CONFIG) == "custom":
+        expected = custom_config
+    elif overrides.get(CONFIG) == "canonical" and overrides.get("OPENCLAW_STATE_DIR") == "custom":
+        expected = previous_root / "openclaw.json"
+    elif overrides.get("OPENCLAW_STATE_DIR") == "custom":
+        expected = custom_state / "openclaw.json"
+    else:
+        expected = selected_root / "openclaw.json"
+    with guest.running("openclaw", *options, "gateway", FAKE_CONFIG=str(expected), **environment):
+        guest.wait_started()
+        seen = guest.starts()[0]["config"]
+        assert isinstance(seen, str)
+        assert json.loads(seen) == {"mcp": {"servers": {"tracelattice": TRACELATTICE}}}
+        for untouched in configs - {expected}:
+            assert untouched.read_text() == "{}"
+
+
+@pytest.mark.parametrize("options,expected_port", [(("--dev",), 19001), (("--profile", "a"), 22220)])
+def test_selected_profile_default_port_is_persisted_without_an_environment_override(
+    guest: Guest, readyz: Readyz, options: tuple[str, ...], expected_port: int,
+) -> None:
+    selected = Readyz(expected_port)
+    selected.status = 200
+    guest.env.pop(PORT)
+    try:
+        with guest.running("openclaw", *options, "gateway") as helper:
+            guest.wait_started()
+            wait_until(guest.event.exists)
+            assert json.loads(guest.event.read_bytes()) == valid_event(gateway_port=expected_port)
+            assert guest.run("check-ready", env={PORT: str(readyz.port)}).returncode == 0
+            assert readyz.hits == []
+            assert selected.hits == ["/readyz", "/readyz"]
+            assert helper.poll() is None
+    finally:
+        selected.close()
+
+
+def test_gateway_dev_option_does_not_select_the_root_dev_profile(guest: Guest, readyz: Readyz) -> None:
+    home = guest.root / "home"
+    default = home / ".openclaw" / "openclaw.json"
+    dev = home / ".openclaw-dev" / "openclaw.json"
+    for config in (default, dev):
+        config.parent.mkdir(parents=True)
+        config.write_text("{}")
+    with guest.running(*GATEWAY, "--dev", FAKE_CONFIG=str(default)):
+        guest.wait_started()
+        seen = guest.starts()[0]["config"]
+        assert isinstance(seen, str)
+        assert json.loads(seen) == {"mcp": {"servers": {"tracelattice": TRACELATTICE}}}
+        assert dev.read_text() == "{}"
+
+
+def test_root_profile_discards_inherited_service_paths_but_keeps_explicit_port_flag(guest: Guest, readyz: Readyz) -> None:
+    home = guest.root / "home"
+    previous = home / ".openclaw"
+    selected = home / ".openclaw-Review"
+    for state in (previous, selected):
+        state.mkdir(parents=True)
+        (state / "openclaw.json").write_text("{}")
+    environment = {
+        "OPENCLAW_SERVICE_MARKER": "openclaw", "OPENCLAW_SERVICE_KIND": "gateway",
+        "OPENCLAW_STATE_DIR": str(previous), CONFIG: str(previous / "openclaw.json"),
+        PORT: "1", "FAKE_CONFIG": str(selected / "openclaw.json"),
+    }
+    with guest.running("openclaw", "--profile", "Review", "gateway", "--port", str(readyz.port), **environment):
+        guest.wait_started()
+        seen = guest.starts()[0]["config"]
+        assert isinstance(seen, str)
+        assert json.loads(seen) == {"mcp": {"servers": {"tracelattice": TRACELATTICE}}}
+        assert (previous / "openclaw.json").read_text() == "{}"
+        readyz.status = 200
+        wait_until(guest.event.exists)
+        assert json.loads(guest.event.read_bytes()) == valid_event(gateway_port=readyz.port)

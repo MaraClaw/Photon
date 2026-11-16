@@ -19,8 +19,8 @@ type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, J
 EVENT_DIR: Final = Path("/tmp/maraclaw-bootstrap")
 EVENT_NAME: Final = "AgentBootstrapCompleted"
 EVENT_PATH: Final = EVENT_DIR / f"{EVENT_NAME}.json"
-EVENT_VERSION: Final = 1
-EVENT_KEYS: Final = frozenset({"version", "event", "boot_id", "pid1_start_ticks"})
+EVENT_VERSION: Final = 2
+EVENT_KEYS: Final = frozenset({"version", "event", "boot_id", "pid1_start_ticks", "gateway_port"})
 EVENT_MAX_BYTES: Final = 4096
 BOOT_ID_PATH: Final = Path("/proc/sys/kernel/random/boot_id")
 PID1_STAT_PATH: Final = Path("/proc/1/stat")
@@ -67,19 +67,21 @@ class Reason(StrEnum):
     UNVERIFIABLE = "guest identity unreadable"
 
 
-def classify(document: JsonValue, current: GuestIdentity) -> Reason | None:
-    """None authorizes; otherwise why the event is denied."""
+def classify(document: JsonValue, current: GuestIdentity) -> int | Reason:
+    """Return the verified gateway port, or the reason the event is denied."""
     match document:  # JSON is open-ended; the default case denies.
-        case {"version": int() as version, "event": str() as name, "boot_id": str() as boot_id, "pid1_start_ticks": str() as ticks} if document.keys() == EVENT_KEYS:
+        case {"version": int() as version, "event": str() as name, "boot_id": str() as boot_id, "pid1_start_ticks": str() as ticks, "gateway_port": int() as port} if document.keys() == EVENT_KEYS:
             if type(version) is not int or version != EVENT_VERSION or name != EVENT_NAME:
                 return Reason.UNSUPPORTED
-            return None if (boot_id, ticks) == (current.boot_id, current.pid1_start_ticks) else Reason.MISMATCHED
+            if type(port) is not int or not 0 < port <= 65535:
+                return Reason.MALFORMED
+            return port if (boot_id, ticks) == (current.boot_id, current.pid1_start_ticks) else Reason.MISMATCHED
         case _:
             return Reason.MALFORMED
 
 
-def verify_event() -> Reason | None:
-    """None only for an event written for this guest lifetime; nothing is cached or relied on to be removed."""
+def verify_event() -> int | Reason:
+    """Return this guest lifetime's verified port; nothing is cached or relied on to be removed."""
     try:
         current = GuestIdentity.read()
     except IdentityError:
@@ -103,9 +105,9 @@ def verify_event() -> Reason | None:
     return classify(document, current)
 
 
-def publish_event(identity: GuestIdentity) -> None:
+def publish_event(identity: GuestIdentity, gateway_port: int) -> None:
     """Replace the event atomically: write a sibling file, then rename it over the event."""
-    document = {"version": EVENT_VERSION, "event": EVENT_NAME, "boot_id": identity.boot_id, "pid1_start_ticks": identity.pid1_start_ticks}
+    document = {"version": EVENT_VERSION, "event": EVENT_NAME, "boot_id": identity.boot_id, "pid1_start_ticks": identity.pid1_start_ticks, "gateway_port": gateway_port}
     EVENT_DIR.mkdir(mode=0o755, parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(prefix=".publish.", dir=EVENT_DIR)
     try:

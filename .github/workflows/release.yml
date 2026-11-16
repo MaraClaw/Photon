@@ -9,12 +9,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: photon-release
   cancel-in-progress: false
 
 jobs:
+  verify:
+    name: Verify release commit
+    uses: ./.github/workflows/ci.yml
+
   publish:
     name: Publish and sign OpenClaw image
+    needs: verify
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
@@ -78,36 +83,52 @@ jobs:
         with:
           cosign-release: ${{ env.COSIGN_VERSION }}
 
-      - name: Build and push multi-arch image
+      - name: Build and push versioned image
+        id: build
         env:
           ENV_FILE: /nonexistent
           DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE }}
           IMAGE_TAG: ${{ steps.guard.outputs.version }}
-          PUSH_LATEST: "1"
-        run: ./publish-openclaw-local-dockerfile.sh
+          PUSH_LATEST: "0"
+          OPENCLAW_BUILD_METADATA_FILE: ${{ runner.temp }}/openclaw-build-metadata.json
+        run: |
+          set -euo pipefail
+          ./publish-openclaw-local-dockerfile.sh
+          digest="$(jq -er '."containerimage.digest" | select(type == "string" and test("^sha256:[0-9a-f]{64}$"))' "$OPENCLAW_BUILD_METADATA_FILE")"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Sign and verify image by digest
         env:
           DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE }}
-          IMAGE_TAG: ${{ steps.guard.outputs.version }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
         run: |
           set -euo pipefail
           image="${DOCKERHUB_NAMESPACE}/openclaw"
-          digest="$(docker buildx imagetools inspect "${image}:${IMAGE_TAG}" --format '{{json .Manifest}}' | jq -r '.digest')"
-          if ! printf '%s' "$digest" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
-            echo "::error::could not resolve manifest digest for ${image}:${IMAGE_TAG} (got '$digest')"
-            exit 1
-          fi
-          cosign sign --yes "${image}@${digest}"
+          cosign sign --yes "${image}@${IMAGE_DIGEST}"
           cosign verify \
             --certificate-identity "https://github.com/${WORKFLOW_REF}" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            "${image}@${digest}"
+            "${image}@${IMAGE_DIGEST}"
+
+      - name: Promote verified digest to latest
+        env:
+          DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE }}
+          IMAGE_TAG: ${{ steps.guard.outputs.version }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          image="${DOCKERHUB_NAMESPACE}/openclaw"
+          docker buildx imagetools create --prefer-index=false --tag "${image}:latest" "${image}@${IMAGE_DIGEST}"
+          promoted="$(docker buildx imagetools inspect "${image}:latest" --format '{{json .Manifest}}' | jq -er '.digest')"
+          if [ "$promoted" != "$IMAGE_DIGEST" ]; then
+            echo "::error::latest does not reference the verified release digest"
+            exit 1
+          fi
           {
             echo "### Signed OpenClaw image"
             echo
-            echo "\`${image}@${digest}\`"
+            echo "\`${image}@${IMAGE_DIGEST}\`"
             echo
             echo "Tags: \`${IMAGE_TAG}\`, \`latest\`"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -273,12 +273,17 @@ def exercise_invalid_policy(script: Path, env: dict[str, str], key: str, value: 
 def exercise_final_child(script: Path, env: dict[str, str]) -> None:
     env.update({POLICY_KEYS[0]: "2", POLICY_KEYS[1]: "0.1"})
     fifo = Path(env["PROBE_READY"])
-    env["TMPDIR"] = str(fifo.parent)
+    probe_tmp = fifo.parent / "probe-tmp"
+    probe_tmp.mkdir()
+    env["TMPDIR"] = str(probe_tmp)
     child = fifo.parent / "long_child.py"
     child.write_text(
         "import json, os, signal, sys\n"
         "def stop(signum, frame): sys.exit(128 + signum)\n"
         "signal.signal(signal.SIGTERM, stop)\n"
+        "try: os.fstat(4)\n"
+        "except OSError: pass\n"
+        "else: raise AssertionError('startup probe control descriptor leaked')\n"
         "with open(os.environ['PROBE_READY'], 'w') as ready:\n"
         "    ready.write(json.dumps([os.getpid(), sys.argv[1:]]) + '\\n')\n"
         "while True: signal.pause()\n"
@@ -295,7 +300,7 @@ def exercise_final_child(script: Path, env: dict[str, str]) -> None:
             process.wait(timeout=2.5)
         processes = subprocess.run(["ps", "-eo", "ppid=,pid="], capture_output=True, text=True, timeout=5, check=True)
         assert not [line for line in processes.stdout.splitlines() if int(line.split()[0]) == process.pid]
-        assert not list(fifo.parent.glob("openclaw-probe.*"))
+        assert not list(probe_tmp.iterdir())
         os.kill(process.pid, signal.SIGTERM)
         assert process.wait(timeout=5) == 128 + signal.SIGTERM
 

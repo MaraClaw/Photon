@@ -6,11 +6,10 @@ probe_helper=$probe_dir/startup-probe.py
 probe_assets=$probe_dir/installed-assets.py
 probe_pid=
 probe_file=
-probe_sequence=0
+probe_tmpdir=
 probe_cancelled=0
 probe_interrupted=0
-probe_control=${TMPDIR:-/tmp}/openclaw-probe.$$.control
-probe_control_owned=0
+probe_control=
 probe_channel_ready=0
 
 probe_cancel() {
@@ -30,14 +29,20 @@ probe_cleanup() {
     fi
 }
 
-probe_exit() {
-    probe_cleanup
+probe_teardown() {
     if [ "$probe_channel_ready" -eq 1 ]; then
+        probe_channel_ready=0
         exec 4>&-
     fi
-    if [ "$probe_control_owned" -eq 1 ]; then
-        rm -f -- "$probe_control"
+    if [ -n "$probe_tmpdir" ]; then
+        rm -rf -- "$probe_tmpdir"
+        probe_tmpdir=
+        probe_file=
     fi
+}
+
+probe_exit() {
+    probe_teardown
     if [ "$probe_cancelled" -ne 0 ]; then
         exit "$((128 + probe_cancelled))"
     fi
@@ -92,8 +97,7 @@ probe_verify() {
 
 probe_capture() {
     probe_check_cancelled
-    probe_sequence=$((probe_sequence + 1))
-    probe_file=${TMPDIR:-/tmp}/openclaw-probe.$$.$probe_sequence
+    probe_file=$probe_tmpdir/capture
     if ! (umask 077; set -C; : > "$probe_file") 2>/dev/null; then
         probe_file=
         printf '%s\n' 'Cannot create private startup probe capture' >&2
@@ -123,22 +127,24 @@ probe_capture() {
 }
 
 probe_finish() {
-    probe_cleanup
+    probe_teardown
     probe_check_cancelled
-    rm -f -- "$probe_control"
-    probe_control_owned=0
     trap - HUP INT TERM
     probe_check_cancelled
     trap - 0
-    exec 4>&-
 }
 
 probe_check_cancelled
+if ! probe_tmpdir=$(umask 077; mktemp -d "${TMPDIR:-/tmp}/openclaw-probe.XXXXXXXXXX"); then
+    printf '%s\n' 'Cannot create private startup probe directory' >&2
+    exit 2
+fi
+probe_check_cancelled
+probe_control=$probe_tmpdir/control
 if ! (umask 077; set -C; : > "$probe_control") 2>/dev/null; then
     printf '%s\n' 'Cannot create private startup probe control' >&2
     exit 2
 fi
-probe_control_owned=1
 exec 4>"$probe_control"
 probe_channel_ready=1
 probe_check_cancelled
