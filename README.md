@@ -98,11 +98,13 @@ After `docker login`, publish both architectures under one versioned tag:
 DOCKERHUB_NAMESPACE=youruser ./publish-openclaw-local-dockerfile.sh
 ```
 
-Alternatively set `OPENCLAW_PUBLISH_IMAGE`; `IMAGE_TAG` defaults to `OPENCLAW_VERSION`, else to the Dockerfile's `ARG OPENCLAW_VERSION`, and `PUSH_LATEST=1` also publishes `latest`. The pushed manifest carries max-mode SLSA provenance and an SBOM attestation. Values in the selected env file take precedence over these command-line environment assignments.
+Alternatively set `OPENCLAW_PUBLISH_IMAGE`; `IMAGE_TAG` defaults to `OPENCLAW_VERSION`, else to the Dockerfile's `ARG OPENCLAW_VERSION`, and `PUSH_LATEST=1` also publishes `latest`. The pushed manifest carries max-mode SLSA provenance and an SBOM attestation. Set `OPENCLAW_BUILD_METADATA_FILE` to write Buildx's JSON result, including `containerimage.digest`, to a chosen path. Values in the selected env file take precedence over command-line environment assignments. Manual publication does not sign images; the release workflow below controls signed `latest` promotion.
 
 ### Release
 
-Pushing a tag `openclaw-v<version>` (for example `openclaw-v2026.11.5-beta.4`) runs the Photon Release workflow; `workflow_dispatch` from a tag ref works too. `<version>` must equal the Dockerfile's `ARG OPENCLAW_VERSION`, or the workflow fails before building. It needs the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` and the repository variable `DOCKERHUB_NAMESPACE`. It publishes `<namespace>/openclaw:<version>` and `:latest` for both architectures, then signs the manifest-list digest with cosign keyless (Sigstore, GitHub OIDC). Verify a release with:
+Pushing a tag `openclaw-v<version>` (for example `openclaw-v2026.11.5-beta.4`) runs the Photon Release workflow; `workflow_dispatch` from a tag ref works too. Publication requires `<version>` to equal the Dockerfile's `ARG OPENCLAW_VERSION`. It needs repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` and the repository variable `DOCKERHUB_NAMESPACE`.
+
+The release first runs the reusable CI workflow against the same commit, including both native-architecture image QA jobs. Only after verification succeeds does it build and push the versioned image. It signs and verifies the exact manifest-list digest from Buildx's metadata with cosign keyless (Sigstore, GitHub OIDC), then promotes that digest to `latest` and checks the promoted digest. A signing or verification failure leaves `latest` unchanged. Releases are serialized across tags to prevent concurrent promotion. Verify a release with:
 
 ```bash
 cosign verify \

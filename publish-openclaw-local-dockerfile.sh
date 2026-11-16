@@ -24,6 +24,7 @@
 #   OPENCLAW_BUILD_CACHE_TO    optional BuildKit cache to export, passed to --cache-to
 #                           (for example type=registry,ref=youruser/openclaw:buildcache,mode=max);
 #                           each flag is passed only when its setting is nonempty
+#   OPENCLAW_BUILD_METADATA_FILE  optional path for Buildx's JSON result, including the pushed digest
 #
 # The pushed manifest carries max-mode provenance and an SBOM attestation.
 #
@@ -84,6 +85,11 @@ openclaw_collect_asset_args openclaw-publish \
 
 openclaw_collect_cache_args
 
+METADATA_ARGS=()
+if [ -n "${OPENCLAW_BUILD_METADATA_FILE:-}" ]; then
+    METADATA_ARGS=(--metadata-file "$OPENCLAW_BUILD_METADATA_FILE")
+fi
+
 VERSIONED_REF="${PUBLISH_IMAGE}:${IMAGE_TAG}"
 echo "[openclaw-publish] Building linux/amd64,linux/arm64 and pushing $VERSIONED_REF"
 TAGS=(-t "$VERSIONED_REF")
@@ -99,6 +105,7 @@ docker buildx build \
     ${PIN_ARGS[@]+"${PIN_ARGS[@]}"} \
     ${ASSET_ARGS[@]+"${ASSET_ARGS[@]}"} \
     ${CACHE_ARGS[@]+"${CACHE_ARGS[@]}"} \
+    ${METADATA_ARGS[@]+"${METADATA_ARGS[@]}"} \
     "${TAGS[@]}" \
     --provenance=mode=max \
     --sbom=true \

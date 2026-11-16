@@ -69,7 +69,7 @@ Runtime skill selection policy belongs in the `*-soul.md` fragments. The Dockerf
 - `uv` intentionally upgrades to the latest published release when its Docker layer rebuilds; a cached layer retains its installed version.
 - Each final-stage `ARG` sits directly above the first `RUN` that reads it, and apt is its own layer ahead of the OpenClaw install: a build argument with a value enters the environment of every later `RUN`, so a pin declared earlier would rebuild layers that never read it. Installers carry their own default pins, so an `ARG` declared after its installer is silently ignored.
 - Both scripts forward `OPENCLAW_BUILD_CACHE_FROM`/`OPENCLAW_BUILD_CACHE_TO` as `--cache-from`/`--cache-to` through `openclaw_collect_cache_args` in `openclaw-buildx-common.sh`, only when set and nonempty; the release workflow sets neither.
-- Releases come from `.github/workflows/release.yml` on `openclaw-v<version>` tags and are cosign-signed keyless by digest.
+- Releases come from `.github/workflows/release.yml` on `openclaw-v<version>` tags. The same-commit reusable CI workflow gates publication, including native dual-architecture image QA with the existing MCP reconnect and shared full gateway smoke scenarios. The versioned manifest's Buildx metadata digest is cosign-signed and verified before that exact digest is promoted to `latest`; releases are serialized across tags.
 
 ## Avoid
 

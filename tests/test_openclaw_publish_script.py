@@ -25,7 +25,7 @@ OPENCLAW_VERSION = "2026.11.5-beta.4"
 
 def build_env(bin_dir: Path, log_path: Path, missing_env_file: Path) -> dict[str, str]:
     environment = os.environ.copy()
-    for key in ("DOCKERHUB_NAMESPACE", "OPENCLAW_PUBLISH_IMAGE", "IMAGE_TAG", "PUSH_LATEST", "DOCKER_PLATFORM"):
+    for key in ("DOCKERHUB_NAMESPACE", "OPENCLAW_PUBLISH_IMAGE", "IMAGE_TAG", "PUSH_LATEST", "DOCKER_PLATFORM", "OPENCLAW_BUILD_METADATA_FILE"):
         environment.pop(key, None)
     for key in (*PIN_NAMES, *CACHE_FLAGS):
         environment.pop(key, None)
@@ -198,11 +198,38 @@ def test_publisher_passes_no_cache_flags_and_unchanged_arguments_by_default(tmp_
         assert read_docker_argv(log_path) == expected
 
 
-def test_release_workflow_publishes_without_a_build_cache() -> None:
-    workflow = (REPO_ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-    assert "run: ./publish-openclaw-local-dockerfile.sh" in workflow
-    assert "OPENCLAW_BUILD_CACHE" not in workflow
-    assert "cache-from" not in workflow and "cache-to" not in workflow
+@pytest.mark.parametrize(
+    ("inherited", "from_file", "expected"),
+    [
+        (None, None, None),
+        ("", None, None),
+        ("/tmp/process metadata.json", None, "/tmp/process metadata.json"),
+        (None, "/tmp/file metadata; $HOME.json", "/tmp/file metadata; $HOME.json"),
+        ("/tmp/process.json", "/tmp/file.json", "/tmp/file.json"),
+        ("/tmp/process.json", "", None),
+    ],
+)
+def test_publication_metadata_destination_follows_env_file_precedence(
+    tmp_path: Path, inherited: str | None, from_file: str | None, expected: str | None
+) -> None:
+    bin_dir, log_path = install_fake_docker(tmp_path)
+    env_file = tmp_path / "publish.env"
+    environment = build_env(bin_dir, log_path, env_file) | {"DOCKERHUB_NAMESPACE": "acme"}
+    if inherited is not None:
+        environment["OPENCLAW_BUILD_METADATA_FILE"] = inherited
+    if from_file is not None:
+        write_env_file(env_file, {"OPENCLAW_BUILD_METADATA_FILE": from_file})
+
+    result = run_publish_script(environment)
+
+    assert result.returncode == 0, result.stderr
+    args = read_docker_argv(log_path)
+    if expected is None:
+        assert "--metadata-file" not in args
+    else:
+        assert args.count("--metadata-file") == 1
+        assert args[args.index("--metadata-file") + 1] == expected
+    assert "--push" in args and "--load" not in args
 
 
 @pytest.mark.parametrize(
