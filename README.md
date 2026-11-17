@@ -58,10 +58,10 @@ To reuse layers on a fresh builder, both scripts pass `OPENCLAW_BUILD_CACHE_FROM
 
 `uv` intentionally follows the latest published release through `uv pip install --system --no-cache --upgrade uv`. This is an explicit exception to dependency pinning: the upgrade runs when its Docker layer is rebuilt, while a cache hit retains the previously installed version.
 
-OpenClaw is installed with `npm ci` from the committed `docker/openclaw/openclaw-package/package-lock.json` into `/opt/openclaw`, and `/usr/local/bin/openclaw` links to it. The build fails if `OPENCLAW_VERSION` differs from the locked openclaw version, and it checks the OpenClaw tarball against both `OPENCLAW_SHA256` and the lock's integrity. To bump OpenClaw, update the version in `package.json` and `Dockerfile.openclaw`, delete the lock, and regenerate it:
+OpenClaw is installed with `npm ci` from the committed `docker/openclaw/openclaw-package/package-lock.json` into `/opt/openclaw`, and `/usr/local/bin/openclaw` links to it. The build fails if `OPENCLAW_VERSION` differs from the locked openclaw version, and it checks the OpenClaw tarball against both `OPENCLAW_SHA256` and the lock's integrity. To bump OpenClaw, update the version in `package.json` and `Dockerfile.openclaw`, delete the lock, and regenerate it. The temporary `node_modules` mount prevents an existing host install from influencing resolution:
 
 ```bash
-docker run --rm --platform linux/arm64 -v "$PWD/docker/openclaw/openclaw-package":/work -w /work --entrypoint sh \
+docker run --rm --platform linux/arm64 -v "$PWD/docker/openclaw/openclaw-package":/work --tmpfs /work/node_modules -w /work --entrypoint sh \
   nikolaik/python-nodejs:python3.15-nodejs26-slim@sha256:97081a38e971a9f06c2ae1fcf778d77c9e53f8c94fa1a9c9e300c1f3c9956f0a \
   -c 'npm install -g npm@12.2.2 && npm install --package-lock-only --install-strategy=shallow --ignore-scripts --allow-remote=all --no-audit --no-fund'
 ```
