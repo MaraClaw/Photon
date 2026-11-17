@@ -32,7 +32,7 @@ test "$GOG_KEYRING_PASSWORD" = "$(cat "$GOG_KEYRING_PASSWORD_FILE")"
 test "$(node -p 'process.versions.node.split(".")[0]')" = 26
 test "$(node -p 'process.arch')" = "$EXPECTED_NODE_ARCH"
 printf 'executed node=%s arch=%s kernel=%s\n' "$(node --version)" "$(node -p 'process.arch')" "$(uname -m)"
-gog --version | grep '0.48.0'
+gog --version | grep '0.48.1'
 gog --help > /tmp/gog-smoke-help.txt
 test -s /tmp/gog-smoke-help.txt
 openclaw --version | grep -F '2026.11.5-beta.4'
@@ -47,7 +47,7 @@ test "$OFFICECLI_NO_AUTO_RESIDENT" = 1
 test -f "$HOME/.openclaw/skills/officecli/SKILL.md"
 test -f "$HOME/.openclaw/skills/gog/SKILL.md"
 officecli_version="$(officecli --version)"
-printf '%s\n' "$officecli_version" | grep -Eq '(^|[^0-9])v?1\\.0\\.161([^0-9]|$)'
+printf '%s\n' "$officecli_version" | grep -Eq '(^|[^0-9])v?1\\.0\\.162([^0-9]|$)'
 printf 'executed %s\n' "$officecli_version"
 officecli --help > /tmp/officecli-help.txt
 test -s /tmp/officecli-help.txt
