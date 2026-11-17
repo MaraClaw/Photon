@@ -22,14 +22,14 @@ const cronStorePath = join(process.env.OPENCLAW_STATE_DIR, "cron", "jobs.json");
 writeFileSync(cronStorePath, JSON.stringify({ version: 1, jobs: [] }));
 
 const dist = "/opt/openclaw/node_modules/openclaw/dist/";
-const admission = await import(`${dist}agent-database-admission-CYG-hYfk.mjs`);
+const admission = await import(`${dist}agent-database-admission-zi8jGbuP.mjs`);
 const { t: GatewayScheduler } = await import(`${dist}gateway-scheduler-C5dvA9UW.mjs`);
-const { o: sessionChanges } = await import(`${dist}session-row-changes-CRg-YpLN.mjs`);
-const { startCronMaintenance, stopCronMaintenance } = await import(`${dist}maintenance-Bw1uREq5.mjs`);
-const { O: setRuntimeConfigSnapshot } = await import(`${dist}runtime-snapshot-B--CQHkR.mjs`);
-const { r: openStateDatabase } = await import(`${dist}openclaw-state-db-CClCHCti.mjs`);
-const agentDatabases = await import(`${dist}openclaw-agent-db-qt2SAJ1h.mjs`);
-const { s: closeStateDatabase } = await import(`${dist}openclaw-state-db-cache-EtprK1MX.mjs`);
+const { o: sessionChanges } = await import(`${dist}session-row-changes-B7VKImMV.mjs`);
+const { startCronMaintenance, stopCronMaintenance } = await import(`${dist}maintenance-Xyaoyk4Q.mjs`);
+const { O: setRuntimeConfigSnapshot } = await import(`${dist}runtime-snapshot-DoRd83qA.mjs`);
+const { r: openStateDatabase } = await import(`${dist}openclaw-state-db-Bb4Ye1B0.mjs`);
+const agentDatabases = await import(`${dist}openclaw-agent-db-BH1vKJL5.mjs`);
+const { s: closeStateDatabase } = await import(`${dist}openclaw-state-db-cache-P2pfKBo8.mjs`);
 const { i: getLogger } = await import(`${dist}logger-dFyNvOA3.mjs`);
 
 let now = 100000;
