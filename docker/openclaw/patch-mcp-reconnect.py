@@ -3,7 +3,7 @@
 # dependencies = []
 # ///
 # How to run: python3 patch-mcp-reconnect.py /opt/openclaw/node_modules/openclaw
-"""Patch the pinned beta's disconnected-session wait, refusing source drift."""
+"""Patch the pinned release's disconnected-session wait, refusing source drift."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-VERSION: Final = "2026.11.5-beta.4"
+VERSION: Final = "2026.11.5"
 RUNTIME_NAME: Final = re.compile(r"agent-bundle-mcp-runtime(?:-[\w-]{8})?\.(?:js|mjs)")
 ORIGINAL: Final = '''\t\tconst n = m;
 \t\tg = void 0;

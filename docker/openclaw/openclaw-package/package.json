@@ -4,7 +4,7 @@
   "private": true,
   "description": "Locked dependency tree for the OpenClaw guest image; see Dockerfile.openclaw.",
   "dependencies": {
-    "openclaw": "2026.11.5-beta.4"
+    "openclaw": "2026.11.5"
   },
   "allowScripts": {
     "openclaw": true,
