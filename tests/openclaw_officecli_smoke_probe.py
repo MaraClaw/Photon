@@ -32,7 +32,7 @@ test "$GOG_KEYRING_PASSWORD" = "$(cat "$GOG_KEYRING_PASSWORD_FILE")"
 test "$(node -p 'process.versions.node.split(".")[0]')" = 26
 test "$(node -p 'process.arch')" = "$EXPECTED_NODE_ARCH"
 printf 'executed node=%s arch=%s kernel=%s\n' "$(node --version)" "$(node -p 'process.arch')" "$(uname -m)"
-gog --version | grep '0.48.0'
+gog --version | grep '0.48.1'
 gog --help > /tmp/gog-smoke-help.txt
 test -s /tmp/gog-smoke-help.txt
 openclaw --version | grep -F '2026.11.5-beta.4'
