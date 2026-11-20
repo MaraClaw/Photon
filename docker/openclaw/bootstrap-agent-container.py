@@ -3,6 +3,7 @@
 
 check-ready: validate the event, then probe /readyz. exec -- ACTION...: validate, then exec.
 COMMAND...: exec unchanged, or register the built-in MCP servers, supervise `openclaw gateway` and publish once /readyz answers.
+The supervised gateway defaults OPENCLAW_NO_RESPAWN to 1 so restarts never hand off to a detached process.
 """
 
 import contextlib
@@ -35,6 +36,7 @@ from bootstrap_event import (
 PENDING_EXIT: Final = 75
 BUDGET_SETTING: Final = "OPENCLAW_BOOTSTRAP_TIMEOUT_SECONDS"
 PORT_SETTING: Final = "OPENCLAW_GATEWAY_PORT"
+NO_RESPAWN_SETTING: Final = "OPENCLAW_NO_RESPAWN"
 DECIMAL: Final = re.compile(r"(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)")
 PORT: Final = re.compile(r"[0-9]{1,5}")
 READYZ_TIMEOUT_SECONDS: Final = 5.0
@@ -295,8 +297,12 @@ def serve_gateway(command: list[str], invocation: GatewayInvocation) -> int:
     signals = SignalQueue()
     invalidate_event()
     builtin_mcp.register(report, environ=environ)
+    # OpenClaw's embedding preset: keep restarts in this tracked child instead of a detached
+    # replacement this helper would lose; an explicit value from the caller wins.
+    child_environ = dict(os.environ)
+    child_environ.setdefault(NO_RESPAWN_SETTING, "1")
     try:
-        child = subprocess.Popen(command, start_new_session=True)
+        child = subprocess.Popen(command, start_new_session=True, env=child_environ)
     except OSError as error:
         return launch_failure(command[0], error)
     if (outcome := await_ready(child, signals, port, budget)) is not None:
