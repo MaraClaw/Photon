@@ -194,6 +194,11 @@ COPY --chmod=0755 docker/openclaw/bootstrap_event.py /usr/local/bin/bootstrap_ev
 COPY --chmod=0755 docker/openclaw/builtin_mcp.py /usr/local/bin/builtin_mcp.py
 COPY --chmod=0755 docker/openclaw/bootstrap-agent-container.py /usr/local/bin/bootstrap-agent-container.py
 
+# The base image and root npm runs leave a root-owned /tmp/node-compile-cache. OpenClaw keeps
+# its worker and child compile cache below os.tmpdir()/node-compile-cache, so the node user
+# must be able to create it; remove it after the last root step.
+RUN rm -rf /tmp/node-compile-cache
+
 USER node
 ENTRYPOINT ["tini", "-s", "--", "/usr/local/bin/validate-gogcli.sh", "/usr/local/bin/validate-officecli.sh", "/usr/local/bin/validate-soul-guardian.sh", "/usr/local/bin/validate-tavily.sh", "/usr/local/bin/validate-humanizer.sh", "/usr/local/bin/validate-tracelattice.sh", "/usr/local/bin/bootstrap-agent-container.py"]
 CMD ["openclaw", "gateway"]
