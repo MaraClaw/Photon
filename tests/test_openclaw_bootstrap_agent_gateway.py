@@ -231,6 +231,15 @@ def test_builtin_mcp_server_is_registered_before_the_gateway_starts(guest: Guest
         assert json.loads(seen) == ENGINE_CONFIG | {"mcp": {"servers": {"tracelattice": TRACELATTICE}}}
 
 
+@pytest.mark.parametrize("environment,expected", [({}, "1"), ({"OPENCLAW_NO_RESPAWN": "0"}, "0")], ids=["default", "explicit"])
+def test_gateway_restarts_stay_in_the_supervised_child_unless_the_caller_decides(
+    guest: Guest, readyz: Readyz, environment: dict[str, str], expected: str,
+) -> None:
+    with guest.running(*GATEWAY, **environment):
+        guest.wait_started()
+        assert guest.starts()[0]["no_respawn"] == expected
+
+
 @pytest.mark.parametrize("content,reported", [(None, False), (DISABLED, False), ("not json", True)], ids=["missing", "disabled", "malformed"])
 def test_config_left_as_it_is_never_blocks_the_gateway(guest: Guest, readyz: Readyz, content: str | None, reported: bool) -> None:
     config = guest.root / "openclaw.json"

@@ -52,7 +52,8 @@ terminate = ignored if os.environ.get("FAKE_MODE") == "ignore-term" else leave
 for number, handler in ((signal.SIGTERM, terminate), (signal.SIGHUP, leave), (signal.SIGINT, leave), (signal.SIGUSR1, usr1)):
     signal.signal(number, handler)
 signal.alarm(120)  # a gateway orphaned by a failed test ends itself
-note("start", pid=os.getpid(), argv=sys.argv[1:], stale_event=os.path.exists(os.environ["FAKE_EVENT"]), config=config())
+note("start", pid=os.getpid(), argv=sys.argv[1:], stale_event=os.path.exists(os.environ["FAKE_EVENT"]), config=config(),
+     no_respawn=os.environ.get("OPENCLAW_NO_RESPAWN"))
 if os.environ.get("FAKE_MODE") == "exit":
     sys.exit(int(os.environ.get("FAKE_EXIT", "0")))
 while True:

@@ -76,7 +76,7 @@ def main() -> None:
             print(
                 docker.run(
                     image,
-                    ["sh", "-c", 'test "$(id -u)" != 0 && test "$HOME" = /home/node && test -w "$HOME/.openclaw" && test ! -w /usr/local/share/openclaw-integrity && openclaw --version'],
+                    ["sh", "-c", 'test "$(id -u)" != 0 && test "$HOME" = /home/node && test -w "$HOME/.openclaw" && test ! -w /usr/local/share/openclaw-integrity && { test ! -e /tmp/node-compile-cache || test -w /tmp/node-compile-cache; } && openclaw --version'],
                     name=container,
                     remove=True,
                     networks=["none"],

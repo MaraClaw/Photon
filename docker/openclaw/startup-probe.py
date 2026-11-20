@@ -12,6 +12,7 @@ import ctypes
 import math
 import os
 import re
+import select
 import signal
 import subprocess
 import sys
@@ -220,6 +221,22 @@ def fork_inventory_check(helper: str, component: str, inventory_dir: str, skills
     return Step(pid, lambda: os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1]))
 
 
+def exit_descriptor(pid: int) -> int | None:
+    """A Linux pidfd that becomes readable when the step exits; None where pidfds are unavailable."""
+    if not hasattr(os, "pidfd_open"):
+        return None
+    try:
+        return os.pidfd_open(pid)
+    except OSError:
+        return None
+
+def pause(exited: int | None, seconds: float) -> None:
+    """Wait up to seconds, returning as soon as the step exits when a pidfd is available."""
+    if exited is None:
+        time.sleep(seconds)
+    else:
+        select.select([exited], [], [], seconds)
+
 def supervise(start: Callable[[], Step], policy: Policy, cancellation: Cancellation) -> int:
     """Run one step under its own deadline and grace; cancellation is checked before it starts."""
     if cancellation.check():
@@ -230,6 +247,7 @@ def supervise(start: Callable[[], Step], policy: Policy, cancellation: Cancellat
     except OSError:
         return 1
     timed_out = False
+    exited = exit_descriptor(step.pid)
     try:
         while not cancellation.check():
             if os.waitid(os.P_PID, step.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None:
@@ -237,8 +255,10 @@ def supervise(start: Callable[[], Step], policy: Policy, cancellation: Cancellat
             if time.monotonic() >= deadline:
                 timed_out = True
                 break
-            time.sleep(min(0.02, max(0, deadline - time.monotonic())))
+            pause(exited, min(0.02, max(0, deadline - time.monotonic())))
     finally:
+        if exited is not None:
+            os.close(exited)
         signal_group(step.pid, signal.SIGTERM)
         if timed_out or cancellation.check():
             wait_group(step.pid, time.monotonic() + policy.grace)
