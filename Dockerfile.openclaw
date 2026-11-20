@@ -32,8 +32,8 @@ RUN sed -i \
     "tini=${TINI_VERSION}" \
     && rm -rf /var/lib/apt/lists/*
 
-ARG OPENCLAW_VERSION=2026.11.5
-ARG OPENCLAW_SHA256=sha256:a57d1272b7d87bdbf2b0a0e18811dc1ca3ffc5de02229d1f9e2884bd38470794
+ARG OPENCLAW_VERSION=2026.11.6
+ARG OPENCLAW_SHA256=sha256:0ad54c943c7365ff78cdb0c317c2cd73fd6af9df404da02c7cde9787ea3322ad
 RUN --mount=type=bind,source=docker/openclaw/openclaw-package,target=/tmp/openclaw-package \
     npm install -g npm@12.2.2 \
     && install -D -m 0644 -t /opt/openclaw /tmp/openclaw-package/package.json /tmp/openclaw-package/package-lock.json \

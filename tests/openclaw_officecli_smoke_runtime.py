@@ -165,7 +165,9 @@ def create_workspace(
             for scenario, target in (("fresh", STATE_DIR), ("custom", CUSTOM_STATE_DIR)):
                 path = parent / scenario
                 path.mkdir(mode=0o777)
-                path.chmod(0o777)
+                # Shared with the container's node user; OpenClaw requires sticky protection on
+                # a group/world-writable temp-root ancestor such as the state log directory's parent.
+                path.chmod(0o1777)
                 config = {
                     "gateway": {"mode": "local", "auth": {"mode": "token", "token": "smoke-gateway-token"}},
                     "agents": {"defaults": {"workspace": f"{target}/workspace"}},
